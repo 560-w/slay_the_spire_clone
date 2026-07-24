@@ -225,7 +225,7 @@ class BattleController:
             self.player.name, card.name,
             target_enemy.name if target_enemy else "自身",
         )
-        card.play(user=self.player, target=target_enemy)
+        card.play(user=self.player, target=target_enemy, battle=self)
 
         # 弃置或消耗
         if card.exhausts:
