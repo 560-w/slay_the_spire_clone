@@ -97,7 +97,7 @@ class Defend(Card):
         )
 
     def play(self, user, target=None, battle=None, x_value=0):
-        CardEffects.gain_block(user, self.BLOCK)
+        CardEffects.gain_block(battle, user, self.BLOCK)
 
 
 class Survivor(Card):
@@ -115,7 +115,7 @@ class Survivor(Card):
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert battle is not None
-        CardEffects.gain_block(user, self.BLOCK)
+        CardEffects.gain_block(battle, user, self.BLOCK)
         # 设置弃牌选择挂起动作
         # 可选手牌 = 当前手牌（生存者已在处理区，不在手牌中）
         selectable = list(user.hand)
@@ -280,7 +280,7 @@ class Hologram(Card):
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert battle is not None
-        CardEffects.gain_block(user, self.BLOCK)
+        CardEffects.gain_block(battle, user, self.BLOCK)
         selectable = list(user.discard_pile)
         if not selectable:
             logger.info("[Hologram] 弃牌堆为空，跳过选择")
@@ -300,6 +300,38 @@ class Hologram(Card):
             cards=selectable,
             callback=on_select,
         )
+
+
+# ====================================================================== #
+# 指向性技能牌（状态效果类）
+# ====================================================================== #
+class Domination(Card):
+    """主宰：1c 技能牌，使一名敌人获得1层易伤，然后你获得等同于其易伤层数的力量。"""
+
+    def __init__(self):
+        super().__init__(name="主宰",cost=1,card_type=Card.TYPE_SKILL,description="使一名敌人获得1层易伤，然后你获得等同于其易伤层数的力量。",needs_target=True)
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert target is not None
+        CardEffects.add_buff(target, BuffSystem.BUFF_VULNERABLE, 1)
+        vuln_stacks = target.get_buff_stacks(BuffSystem.BUFF_VULNERABLE)
+        CardEffects.add_buff(user, BuffSystem.BUFF_POWER, vuln_stacks)
+        if battle: battle._log(f"{user.name} 获得{vuln_stacks}层力量")
+
+
+class DarkShackles(Card):
+    """黑暗镣铐：0c 技能牌，使一名敌人本回合失去8点力量。"""
+
+    POWER_LOSS = 8
+
+    def __init__(self):
+        super().__init__(name="黑暗镣铐",cost=0,card_type=Card.TYPE_SKILL,description=f"使一名敌人在本回合失去{self.POWER_LOSS}点力量。",needs_target=True)
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert target is not None
+        CardEffects.add_buff(target, BuffSystem.BUFF_POWER, -self.POWER_LOSS)
+        CardEffects.add_buff(target, BuffSystem.BUFF_GAIN_POWER_END, self.POWER_LOSS)
+        if battle: battle._log(f"{target.name} 本回合失去{self.POWER_LOSS}力量")
 
 
 # ====================================================================== #

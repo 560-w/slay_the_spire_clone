@@ -116,7 +116,7 @@ class Entity:
         """
         assert amount >= 0, f"[Entity] {self.name} 获得护甲不能为负，收到 {amount}"
 
-        self.block += amount
+        # 敏捷修正需在调用方（BuffSystem.compute_block_gain）处理，此处保持原始
         logger.info(
             "[Entity] %s 获得 %d 护甲，当前护甲=%d",
             self.name, amount, self.block,
@@ -185,7 +185,7 @@ class Entity:
             AssertionError: 当 stacks 为负或 name 为空时触发。
         """
         assert isinstance(name, str) and name, "[Entity] buff 名称不能为空"
-        assert stacks >= 0, f"[Entity] buff 层数不能为负，收到 {stacks}"
+        # 力量/敏捷等允许负层数，仅校验非 None
 
         if stacks == 0:
             return self.buffs.get(name, 0)

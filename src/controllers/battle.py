@@ -99,7 +99,7 @@ class BattleController:
 
         self.player.current_energy = self.player.max_energy
         # 基础抽5张 + 回合多抽 buff 加成
-        draw_count: int = 5 + self.player.get_buff_stacks(BuffSystem.BUFF_DRAW_NEXT)
+        draw_count: int = 5 + self.buff_system.get_extra_draw(self.player)
         self.player.draw_cards(draw_count)
 
         self.message = f"回合 {self.turn_number} - 玩家行动"
