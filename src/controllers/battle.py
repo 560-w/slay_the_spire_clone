@@ -68,6 +68,7 @@ class BattleController:
         self.message: str = ""
         self.pending_action: PendingAction = None
         self._play_depth: int = 0  # 嵌套深度计数
+        self.battle_log: list[str] = []  # 战斗日志（供 UI 展示）
 
         for enemy in self.enemies:
             enemy.choose_intents()
@@ -212,6 +213,7 @@ class BattleController:
             target_enemy.name if target_enemy else "自身/无",
             x_value, not from_hand,
         )
+        self._log(f"打出 {card.name}" + (f" → {target_enemy.name}" if target_enemy else ""))
 
         # 执行 play
         card.play(
@@ -229,15 +231,24 @@ class BattleController:
         # 检查胜负
         self.check_victory()
 
+    def _log(self, msg: str) -> None:
+        """记录战斗日志（保留最近20条）。"""
+        self.battle_log.append(msg)
+        if len(self.battle_log) > 20:
+            self.battle_log.pop(0)
+
     def _finalize_card(self, card: Card) -> None:
         """结算完成：从处理区弹出，进入弃牌堆/消耗堆。"""
         popped: Card = self.player.pop_from_processing()
         assert popped is card, f"[Battle] 处理区栈顶不一致: {popped.name} != {card.name}"
-        if card.exhausts:
+        # 能力牌打出后"融入"角色，进消耗堆（简化为消耗）
+        if card.exhausts or card.is_power:
             self.player.exhaust_pile.append(card)
+            self._log(f"{card.name} 消耗")
             logger.info("[Battle] %s 消耗: %s", self.player.name, card.name)
         else:
             self.player.discard_pile.append(card)
+            self._log(f"{card.name} 弃置")
             logger.info("[Battle] %s 弃置: %s", self.player.name, card.name)
 
     # ------------------------------------------------------------------ #
@@ -250,14 +261,18 @@ class BattleController:
         action: PendingCardSelection = self.pending_action
         self.pending_action = None
 
-        # 执行选择动作（弃置/消耗）
-        for c in selected_cards:
-            if action.action == "discard":
+        # 执行选择动作（弃置/消耗/custom 由回调处理）
+        if action.action == "discard":
+            for c in selected_cards:
                 self.player.discard_card(c)
-            elif action.action == "exhaust":
-                self.player.hand.remove(c)
+                self._log(f"弃置 {c.name}")
+        elif action.action == "exhaust":
+            for c in selected_cards:
+                if c in self.player.hand:
+                    self.player.hand.remove(c)
                 self.player.exhaust_pile.append(c)
-            # transform 等留待后续
+                self._log(f"消耗 {c.name}")
+        # custom: 回调自行处理卡牌去向
 
         # 回调
         action.callback(selected_cards)
@@ -415,4 +430,5 @@ class BattleController:
             "enemy_summaries": enemy_summaries,
             "selected_card_idx": self.selected_card_idx,
             "pending_action": self.pending_action,
+            "battle_log": self.battle_log,
         }

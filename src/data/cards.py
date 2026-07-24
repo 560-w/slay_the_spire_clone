@@ -126,7 +126,8 @@ class Survivor(Card):
             prompt="选择一张手牌丢弃",
             count=1,
             action="discard",
-            callback=lambda cards: None,  # 弃置动作在 resolve_pending_selection 中执行
+            cards=list(user.hand),
+            callback=lambda cards: None,
         )
 
 
@@ -261,6 +262,47 @@ class Whirlwind(Card):
 
 
 # ====================================================================== #
+# 技能牌（消耗类）
+# ====================================================================== #
+class Hologram(Card):
+    """全息影像：1c，获得4点格挡，选择弃牌堆中一张牌加入手牌。消耗。"""
+
+    BLOCK: int = 4
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="全息影像",
+            cost=1,
+            card_type=Card.TYPE_SKILL,
+            description=f"获得 {self.BLOCK} 点格挡。选择弃牌堆中的一张牌加入手牌。",
+            exhausts=True,
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert battle is not None
+        CardEffects.gain_block(user, self.BLOCK)
+        selectable = list(user.discard_pile)
+        if not selectable:
+            logger.info("[Hologram] 弃牌堆为空，跳过选择")
+            return
+        def on_select(cards):
+            if cards:
+                card = cards[0]
+                if card in user.discard_pile:
+                    user.discard_pile.remove(card)
+                    user.hand.append(card)
+                    if battle:
+                        battle._log(f"{card.name} 从弃牌堆加入手牌")
+        battle.pending_action = PendingCardSelection(
+            prompt="从弃牌堆选择一张牌加入手牌",
+            count=1,
+            action="custom",
+            cards=selectable,
+            callback=on_select,
+        )
+
+
+# ====================================================================== #
 # 卡牌工厂函数
 # ====================================================================== #
 def create_wound() -> Card:
@@ -288,4 +330,5 @@ def create_test_deck_with_new_cards() -> list[Card]:
         Strike(), Strike(), Strike(),
         Defend(), Defend(),
         Survivor(), Offering(), MachineLearning(), Whirlwind(),
+        Hologram(),
     ]
