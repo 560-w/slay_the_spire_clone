@@ -116,7 +116,7 @@ class Entity:
         """
         assert amount >= 0, f"[Entity] {self.name} 获得护甲不能为负，收到 {amount}"
 
-        # 敏捷修正需在调用方（BuffSystem.compute_block_gain）处理，此处保持原始
+        self.block += amount
         logger.info(
             "[Entity] %s 获得 %d 护甲，当前护甲=%d",
             self.name, amount, self.block,
