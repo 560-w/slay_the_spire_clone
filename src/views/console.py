@@ -74,7 +74,10 @@ class DebugConsole:
         self.active = not self.active
         self.input_text = ""
         if self.active:
+            pygame.key.start_text_input()
             self._print("调试控制台已激活，输入 help 查看命令", COLOR_INFO)
+        else:
+            pygame.key.stop_text_input()
 
     def handle_keydown(self, event: pygame.event.Event) -> bool:
         """处理键盘输入（控制台激活时调用）。
@@ -97,10 +100,11 @@ class DebugConsole:
         if event.key == pygame.K_ESCAPE:
             self.active = False
             self.input_text = ""
+            pygame.key.stop_text_input()
             return True
 
-        # 可打印字符
-        if 32 <= event.unicode and event.unicode.isprintable():
+        # 可打印字符（用 TEXTINPUT 事件更可靠，但 KEYDOWN 的 unicode 也可用）
+        if event.unicode and event.unicode.isprintable() and event.key != pygame.K_BACKQUOTE:
             self.input_text += event.unicode
             return True
 
