@@ -63,10 +63,20 @@ class PygameView:
         pygame.display.set_caption("杀戮尖塔克隆版 - Phase 2")
         self.clock = pygame.time.Clock()
 
-        # 尝试加载中文字体
-        font_name = pygame.font.match_font("microsoftyahei,simhei,arialunicodems")
+        # 直接按路径加载中文字体（绕过 match_font 的系统字体枚举崩溃 bug）
+        import os
+        candidate_fonts = [
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+            "C:/Windows/Fonts/simsun.ttc",
+        ]
+        font_name = None
+        for path in candidate_fonts:
+            if os.path.isfile(path):
+                font_name = path
+                break
         if font_name is None:
-            logger.warning("[View] 未找到中文字体，将使用默认字体")
+            logger.warning("[View] 未找到中文字体，使用默认字体")
             font_name = pygame.font.get_default_font()
         self.font = pygame.font.Font(font_name, 20)
         self.font_small = pygame.font.Font(font_name, 16)
