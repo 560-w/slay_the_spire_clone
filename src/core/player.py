@@ -69,6 +69,7 @@ class Player(Entity):
         self.hand: List[Card] = []
         self.discard_pile: List[Card] = []
         self.exhaust_pile: List[Card] = []
+        self.processing_pile: List[Card] = []  # 处理区（栈结构，末尾为栈顶）
         self.max_hand_size: int = max_hand_size
 
         logger.debug(
@@ -220,6 +221,25 @@ class Player(Entity):
         """直接向弃牌堆添加一张卡牌。"""
         self.discard_pile.append(card)
         logger.debug("[Player] %s 弃牌堆加入卡牌: %s", self.name, card.name)
+
+    # ------------------------------------------------------------------ #
+    # 处理区管理（栈结构）
+    # ------------------------------------------------------------------ #
+    def push_to_processing(self, card: Card) -> None:
+        """将卡牌推入处理区栈顶（打出时调用）。"""
+        self.processing_pile.append(card)
+        logger.debug("[Player] %s 处理区推入: %s (栈深=%d)", self.name, card.name, len(self.processing_pile))
+
+    def pop_from_processing(self) -> Card:
+        """从处理区弹出栈顶卡牌（结算完成时调用）。
+
+        Raises:
+            AssertionError: 当处理区为空时触发。
+        """
+        assert self.processing_pile, "[Player] 处理区为空，无法弹出"
+        card = self.processing_pile.pop()
+        logger.debug("[Player] %s 处理区弹出: %s (栈深=%d)", self.name, card.name, len(self.processing_pile))
+        return card
 
     # ------------------------------------------------------------------ #
     # 回合钩子（占位，具体逻辑由控制器实现）

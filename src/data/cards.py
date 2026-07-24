@@ -1,17 +1,21 @@
 """cards.py: 具体卡牌定义。
 
 包含:
-- Strike 打击：单目标攻击牌，6 伤害，费用 1，needs_target=True
-- Defend 防御：非指向性技能牌，5 护甲，费用 1
-- Bash 重击：单目标攻击牌，8 伤害+2 易伤，费用 2，needs_target=True
-- 状态牌:
-  - Wound 伤口：不可打出（playable=False）
-  - Dazed 晕眩：不可打出（playable=False），费用 0 占手牌
+- Strike 打击：单目标攻击牌，6 伤害
+- Defend 防御：获得 5 护甲
+- Bash 重击：8 伤害 + 2 易伤
+- 生存者：7 护甲 + 弃1张手牌（PendingCardSelection）
+- 祭品：失去6生命 + 抽3张 + 获得3能量
+- 机器学习：能力牌，每回合多抽1张（回合多抽 buff）
+- 灼伤：状态牌，不可打出，回合结束自动打出造成3伤害
+- 倾斜：X费，打出抽牌堆顶 X 张牌
+- 状态牌: Wound 伤口, Dazed 晕眩
 
 设计原则:
-1. 攻击牌 play 内部经 battle.buff_system 修正伤害后再 take_damage。
-2. 状态牌 playable=False，控制器会拒绝打出。
-3. 每张卡牌的 needs_target 独立设定，与类别无关。
+1. 攻击牌经 CardEffects.deal_damage 修正伤害。
+2. 选择类效果设置 battle.pending_action，由玩家完成选择后 resolve。
+3. X费牌用 x_value 参数接收实际消耗能量。
+4. 处理区机制保证嵌套结算安全（倾斜打出倾斜）。
 """
 
 from __future__ import annotations
@@ -21,7 +25,9 @@ from typing import TYPE_CHECKING, Optional
 
 from src.core.buff_system import BuffSystem
 from src.core.card import Card
+from src.core.card_effects import CardEffects
 from src.core.entity import Entity
+from src.core.pending_action import PendingCardSelection
 
 if TYPE_CHECKING:
     from src.controllers.battle import BattleController
@@ -46,37 +52,14 @@ class Strike(Card):
             needs_target=True,
         )
 
-    def play(
-        self,
-        user: Entity,
-        target: Optional[Entity] = None,
-        battle: Optional["BattleController"] = None,
-    ) -> None:
-        """对目标造成伤害（经 buff 修正）。
-
-        Args:
-            user: 打出者。
-            target: 目标敌人，必须非 None。
-            battle: 战斗控制器（提供 buff_system）。
-
-        Raises:
-            AssertionError: 当 target 或 battle 为 None 时触发。
-        """
+    def play(self, user, target=None, battle=None, x_value=0):
         assert target is not None, "[Strike] 攻击牌必须指定目标"
-        assert battle is not None, "[Strike] 需要 battle 引用以修正伤害"
-
-        # 经攻击方 buff 修正（力量/虚弱）
-        outgoing: int = battle.buff_system.compute_outgoing_damage(user, self.DAMAGE)
-        # 经受击方 buff 修正（易伤）
-        incoming: int = battle.buff_system.compute_incoming_damage(target, outgoing)
-
-        logger.info("[Card] %s 打出 %s → %s (基础%d → 最终%d)",
-                    user.name, self.name, target.name, self.DAMAGE, incoming)
-        target.take_damage(incoming)
+        assert battle is not None, "[Strike] 需要 battle 引用"
+        CardEffects.deal_damage(battle, user, target, self.DAMAGE)
 
 
 class Bash(Card):
-    """重击：单目标攻击牌，造成 8 伤害并施加 2 层易伤，费用 2。"""
+    """重击：8 伤害 + 2 易伤，费用 2。"""
 
     DAMAGE: int = 8
     VULNERABLE_STACKS: int = 2
@@ -90,38 +73,18 @@ class Bash(Card):
             needs_target=True,
         )
 
-    def play(
-        self,
-        user: Entity,
-        target: Optional[Entity] = None,
-        battle: Optional["BattleController"] = None,
-    ) -> None:
-        """对目标造成伤害并施加易伤。
-
-        Args:
-            user: 打出者。
-            target: 目标敌人，必须非 None。
-            battle: 战斗控制器。
-        """
-        assert target is not None, "[Bash] 攻击牌必须指定目标"
-        assert battle is not None, "[Bash] 需要 battle 引用"
-
-        # 伤害修正
-        outgoing: int = battle.buff_system.compute_outgoing_damage(user, self.DAMAGE)
-        incoming: int = battle.buff_system.compute_incoming_damage(target, outgoing)
-        logger.info("[Card] %s 打出 %s → %s (基础%d → 最终%d)",
-                    user.name, self.name, target.name, self.DAMAGE, incoming)
-        target.take_damage(incoming)
-
-        # 施加易伤
-        target.add_buff(BuffSystem.BUFF_VULNERABLE, self.VULNERABLE_STACKS)
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert target is not None
+        assert battle is not None
+        CardEffects.deal_damage(battle, user, target, self.DAMAGE)
+        CardEffects.add_buff(target, BuffSystem.BUFF_VULNERABLE, self.VULNERABLE_STACKS)
 
 
 # ====================================================================== #
 # 技能牌
 # ====================================================================== #
 class Defend(Card):
-    """防御：非指向性技能牌，获得 5 护甲，费用 1。"""
+    """防御：获得 5 护甲，费用 1。"""
 
     BLOCK: int = 5
 
@@ -131,52 +94,105 @@ class Defend(Card):
             cost=1,
             card_type=Card.TYPE_SKILL,
             description=f"获得 {self.BLOCK} 点护甲。",
-            needs_target=False,
         )
 
-    def play(
-        self,
-        user: Entity,
-        target: Optional[Entity] = None,
-        battle: Optional["BattleController"] = None,
-    ) -> None:
-        """使用者获得护甲。"""
-        logger.info("[Card] %s 打出 %s", user.name, self.name)
-        user.gain_block(self.BLOCK)
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.gain_block(user, self.BLOCK)
+
+
+class Survivor(Card):
+    """生存者：获得 7 护甲，选择一张手牌丢弃，费用 1。"""
+
+    BLOCK: int = 7
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="生存者",
+            cost=1,
+            card_type=Card.TYPE_SKILL,
+            description=f"获得 {self.BLOCK} 点护挡。选择一张手牌丢弃。",
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert battle is not None
+        CardEffects.gain_block(user, self.BLOCK)
+        # 设置弃牌选择挂起动作
+        # 可选手牌 = 当前手牌（生存者已在处理区，不在手牌中）
+        selectable = list(user.hand)
+        if not selectable:
+            logger.info("[Survivor] 无手牌可弃，跳过选择")
+            return
+        battle.pending_action = PendingCardSelection(
+            prompt="选择一张手牌丢弃",
+            count=1,
+            action="discard",
+            callback=lambda cards: None,  # 弃置动作在 resolve_pending_selection 中执行
+        )
+
+
+class Offering(Card):
+    """祭品：失去 6 生命，抽 3 张牌，获得 3 能量，费用 0。"""
+
+    HP_LOSS: int = 6
+    DRAW_COUNT: int = 3
+    ENERGY_GAIN: int = 3
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="祭品",
+            cost=0,
+            card_type=Card.TYPE_SKILL,
+            description=f"失去 {self.HP_LOSS} 生命，抽 {self.DRAW_COUNT} 张牌，获得 {self.ENERGY_GAIN} 点能量。",
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.lose_hp(user, self.HP_LOSS)
+        CardEffects.draw_cards(user, self.DRAW_COUNT)
+        CardEffects.gain_energy(user, self.ENERGY_GAIN)
 
 
 # ====================================================================== #
-# 状态牌（不可打出）
+# 能力牌
+# ====================================================================== #
+class MachineLearning(Card):
+    """机器学习：每回合开始时多抽 1 张牌，费用 1。"""
+
+    DRAW_BUFF_STACKS: int = 1
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="机器学习",
+            cost=1,
+            card_type=Card.TYPE_POWER,
+            description="每回合开始时多抽 1 张牌。",
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        # 获得持久 buff「回合多抽」
+        CardEffects.add_buff(user, BuffSystem.BUFF_DRAW_NEXT, self.DRAW_BUFF_STACKS)
+
+
+# ====================================================================== #
+# 状态牌
 # ====================================================================== #
 class Wound(Card):
-    """伤口：状态牌，不可打出。回合结束时造成 2 点伤害（由状态效果模拟）。
-
-    Phase 2 简化实现：仅作为占位状态牌塞入手牌占位，不实际造成伤害
-    （完整状态效果系统留待后续 Phase）。
-    """
+    """伤口：状态牌，不可打出。"""
 
     def __init__(self) -> None:
         super().__init__(
             name="伤口",
             cost=1,
             card_type=Card.TYPE_SKILL,
-            description="不可打出。回合结束时受到 2 点伤害（暂未实现）。",
-            needs_target=False,
+            description="不可打出。",
             playable=False,
         )
 
-    def play(
-        self,
-        user: Entity,
-        target: Optional[Entity] = None,
-        battle: Optional["BattleController"] = None,
-    ) -> None:
-        """状态牌无法打出，此方法不应被调用。"""
+    def play(self, user, target=None, battle=None, x_value=0):
         raise RuntimeError("[Wound] 状态牌无法打出")
 
 
 class Dazed(Card):
-    """晕眩：状态牌，不可打出，费用 0，占用手牌位。"""
+    """晕眩：状态牌，不可打出，费用 0。"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -184,31 +200,79 @@ class Dazed(Card):
             cost=0,
             card_type=Card.TYPE_SKILL,
             description="不可打出。占据手牌位。",
-            needs_target=False,
             playable=False,
         )
 
-    def play(
-        self,
-        user: Entity,
-        target: Optional[Entity] = None,
-        battle: Optional["BattleController"] = None,
-    ) -> None:
-        """状态牌无法打出，此方法不应被调用。"""
+    def play(self, user, target=None, battle=None, x_value=0):
         raise RuntimeError("[Dazed] 状态牌无法打出")
 
 
+class Burn(Card):
+    """灼伤：状态牌，不能被打出，回合结束时若在手牌中自动打出造成 3 点伤害。
+
+    实现: playable=False + auto_play_end_of_turn=True
+    play() 效果: 对自己造成 3 点伤害（无视护甲）
+    """
+
+    DAMAGE: int = 3
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="灼伤",
+            cost=1,
+            card_type=Card.TYPE_SKILL,
+            description="不能被打出。回合结束时若在手牌中，受到 3 点伤害。",
+            playable=False,
+            auto_play_end_of_turn=True,
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        # 对自己造成伤害（无视护甲）
+        CardEffects.lose_hp(user, self.DAMAGE)
+
+
 # ====================================================================== #
-# 卡牌工厂函数（供敌人 ADD_CARD 意图创建状态牌，及初始牌组构建）
+# X费牌
+# ====================================================================== #
+class Whirlwind(Card):
+    """倾斜：X费，依次打出抽牌堆顶部的前 X 张牌。
+
+    X = 打出时消耗的所有能量。
+    自动打出时 X = 当前能量（不扣）。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="倾斜",
+            cost=0,
+            card_type=Card.TYPE_SKILL,
+            description="依次打出抽牌堆顶部的前 X 张牌（X 为本牌消耗的能量数）。",
+            is_x_cost=True,
+        )
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert battle is not None, "[Whirlwind] 需要 battle 引用"
+        logger.info("[Whirlwind] 倾斜打出，x_value=%d", x_value)
+        if x_value <= 0:
+            logger.info("[Whirlwind] x_value=0，空效果")
+            return
+        # 调用控制器的自动打牌接口（处理抽牌堆不足/嵌套）
+        battle.auto_play_from_draw_top(x_value)
+
+
+# ====================================================================== #
+# 卡牌工厂函数
 # ====================================================================== #
 def create_wound() -> Card:
-    """创建一张「伤口」状态牌。"""
     return Wound()
 
 
 def create_dazed() -> Card:
-    """创建一张「晕眩」状态牌。"""
     return Dazed()
+
+
+def create_burn() -> Card:
+    return Burn()
 
 
 def create_starter_deck() -> list[Card]:
@@ -216,3 +280,12 @@ def create_starter_deck() -> list[Card]:
     return ([Strike() for _ in range(5)]
             + [Defend() for _ in range(4)]
             + [Bash()])
+
+
+def create_test_deck_with_new_cards() -> list[Card]:
+    """创建包含 Phase 3 新卡的测试牌组。"""
+    return [
+        Strike(), Strike(), Strike(),
+        Defend(), Defend(),
+        Survivor(), Offering(), MachineLearning(), Whirlwind(),
+    ]

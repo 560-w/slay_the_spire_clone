@@ -44,6 +44,7 @@ class BuffSystem:
     BUFF_WEAK: str = "虚弱"
     BUFF_VULNERABLE: str = "易伤"
     BUFF_LIGHTNING: str = "电击"
+    BUFF_DRAW_NEXT: str = "回合多抽"  # 持久，每回合开始多抽该层数的牌
 
     # 临时 buff：每回合开始时层数 -1
     TEMPORARY_BUFFS: set[str] = {BUFF_WEAK, BUFF_VULNERABLE}

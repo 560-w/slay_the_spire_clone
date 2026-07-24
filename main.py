@@ -16,7 +16,7 @@ import pygame
 
 from src.controllers.battle import BattleController, BattleState
 from src.core.player import Player
-from src.data.cards import create_starter_deck
+from src.data.cards import create_test_deck_with_new_cards as create_starter_deck
 from src.data.enemies import create_test_enemies
 from src.views.pygame_view import PygameView
 
