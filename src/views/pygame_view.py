@@ -35,6 +35,7 @@ class PygameView:
         self.end_turn_rect=pygame.Rect(0,0,0,0)
         self.draw_pile_rect=pygame.Rect(0,0,0,0); self.discard_pile_rect=pygame.Rect(0,0,0,0); self.exhaust_pile_rect=pygame.Rect(0,0,0,0)
         self.browser=None
+        self.console=None  # DebugConsole
 
     def render(self, battle):
         state=battle.get_state()
@@ -54,6 +55,8 @@ class PygameView:
         if battle.is_over(): self._render_end_screen(battle)
         if self.browser is not None:
             self.browser.render(self.screen,self.font,self.font_small,self.font_big)
+        if self.console is not None:
+            self.console.render(self.screen,self.font,self.font_small)
         pygame.display.flip()
 
     def _render_player_info(self, player):
