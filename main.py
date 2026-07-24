@@ -113,23 +113,24 @@ def main() -> None:
         print(f"    {idx}. {card}")
 
     # ----- 演示打出一张防御牌获得护甲 -----
-    print("\n【演示打出一张防御牌】")
-    defend_card = next((c for c in player.hand if c.name == "防御"), None)
-    if defend_card is not None:
-        player.spend_energy(defend_card.cost)   # 先扣能量
-        defend_card.play(user=player)            # 再结算效果
-        player.discard_card(defend_card)         # 最后弃置
-        print(f"  玩家: {player}")
+    # 注：使用显式创建的卡牌演示，避免随机抽牌导致演示缺失
+    print("\n【演示打出一张防御牌（获得护甲）】")
+    defend_card = Defend()
+    player.hand.append(defend_card)          # 先加入手牌（满足弃置断言）
+    player.spend_energy(defend_card.cost)   # 扣能量
+    defend_card.play(user=player)            # 结算效果
+    player.discard_card(defend_card)         # 弃置
+    print(f"  玩家: {player}")
 
     # ----- 演示打出一张打击牌攻击敌人 -----
-    print("\n【演示打出一张打击牌攻击敌人】")
-    strike_card = next((c for c in player.hand if c.name == "打击"), None)
-    if strike_card is not None:
-        player.spend_energy(strike_card.cost)
-        strike_card.play(user=player, target=enemy)
-        player.discard_card(strike_card)
-        print(f"  玩家: {player}")
-        print(f"  敌人: {enemy}")
+    print("\n【演示打出一张打击牌（攻击敌人）】")
+    strike_card = Strike()
+    player.hand.append(strike_card)          # 先加入手牌
+    player.spend_energy(strike_card.cost)
+    strike_card.play(user=player, target=enemy)
+    player.discard_card(strike_card)
+    print(f"  玩家: {player}")
+    print(f"  敌人: {enemy}")
 
     # ----- 演示敌人受击后获得 buff -----
     print("\n【演示敌人获得「虚弱」buff】")
