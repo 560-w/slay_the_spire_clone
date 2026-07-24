@@ -243,6 +243,23 @@ class Entity:
         return self.buffs.get(name, 0)
 
     # ------------------------------------------------------------------ #
+    # 回合钩子（供 BattleController 调用，具体 buff tick 由 BuffSystem 处理）
+    # ------------------------------------------------------------------ #
+    def start_of_turn(self) -> None:
+        """回合开始通用钩子：清空护甲（回合开始护甲不保留）。
+
+        buff 的层数递减/电击伤害等由 BuffSystem.tick_*_of_turn 处理，
+        此处只做实体自身的通用清理。
+        """
+        if self.block > 0:
+            logger.info("[Entity] %s 回合开始清空护甲: %d → 0", self.name, self.block)
+            self.block = 0
+
+    def end_of_turn(self) -> None:
+        """回合结束通用钩子（当前为空，预留扩展）。"""
+        pass
+
+    # ------------------------------------------------------------------ #
     # 状态查询
     # ------------------------------------------------------------------ #
     def is_dead(self) -> bool:
