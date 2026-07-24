@@ -44,10 +44,15 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_BACKQUOTE:  # ~ 键
+                if event.key == pygame.K_BACKQUOTE:  # ~ 键切换
                     console.toggle()
                 elif console.active:
-                    console.handle_keydown(event)
+                    # 控制台激活时只处理特殊键（回车/退格/ESC）
+                    if event.key in (pygame.K_RETURN, pygame.K_BACKSPACE, pygame.K_ESCAPE):
+                        console.handle_keydown(event)
+            elif event.type == pygame.TEXTINPUT and console.active:
+                # 控制台激活时用 TEXTINPUT 事件处理字符输入
+                console.handle_text_input(event.text)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if battle.is_over():
                     running = False

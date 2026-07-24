@@ -110,6 +110,11 @@ class DebugConsole:
 
         return True  # 屏蔽其他键
 
+    def handle_text_input(self, text: str) -> None:
+        """处理 TEXTINPUT 事件的字符输入。"""
+        if self.active and text:
+            self.input_text += text
+
     def render(self, screen: pygame.Surface, font: pygame.font.Font,
                font_small: pygame.font.Font) -> None:
         """渲染控制台（仅激活时）。"""
