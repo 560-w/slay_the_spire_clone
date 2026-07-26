@@ -146,7 +146,7 @@ class Map:
         self.current_page = 2
         self.page1_completed = True
 
-        layer_nodes = self._generate_page_layers()
+        layer_nodes = self._generate_page_layers(layer0_count=1)
         # 第二页第 0 层是宝箱房（已访问状态，作为入口）
         for node in layer_nodes[0]:
             node.room_type = RoomType.TREASURE
@@ -164,7 +164,7 @@ class Map:
             self.num_layers, len(self.nodes),
         )
 
-    def _generate_page_layers(self) -> List[List[MapNode]]:
+    def _generate_page_layers(self, layer0_count: int = 0) -> List[List[MapNode]]:
         """生成单页的各层节点（含类型分配、连接、可达性）。
 
         Returns:
@@ -180,7 +180,7 @@ class Map:
                 # 倒数第二层：2 个
                 count = 2
             else:
-                count = random.randint(2, 3)
+                count = layer0_count if (layer_idx == 0 and layer0_count > 0) else random.randint(2, 3)
             for pos in range(count):
                 node = MapNode(
                     node_id=self._next_id(),
