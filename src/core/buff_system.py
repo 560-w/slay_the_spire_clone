@@ -32,6 +32,7 @@ class BuffSystem:
     BUFF_LIGHTNING: str = "电击"
     BUFF_DRAW_NEXT: str = "回合多抽"
     BUFF_GAIN_POWER_END: str = "回合结束获得力量"
+    BUFF_THORNS: str = "荆棘"
 
     # ------------------------------------------------------------------ #
     # 伤害修正

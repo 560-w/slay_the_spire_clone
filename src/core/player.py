@@ -76,6 +76,9 @@ class Player(Entity):
         self.deck_pile: List[Card] = []
         # 遗物列表（跨战斗持久化）
         self.relics: list = []  # List[Relic]
+        # 游戏统计（用于结算）
+        self.total_kills: int = 0
+        self.floors_cleared: int = 0
 
         logger.debug(
             "[Player] 创建玩家 %s (max_hp=%d, max_energy=%d)",

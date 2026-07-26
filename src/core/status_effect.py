@@ -155,6 +155,13 @@ class GainPowerAtTurnEndEffect(StatusEffect):
         logger.info("[Effect] %s 回合结束获得力量×%d，已恢复并清空", entity.name, stacks)
 
 
+class ThornsEffect(StatusEffect):
+    """荆棘：每层在被攻击时反弹1点伤害。持久，不递减。"""
+
+    def __init__(self) -> None:
+        super().__init__(name="荆棘", has_stacks=True)
+
+
 # ====================================================================== #
 # 注册表
 # ====================================================================== #
@@ -177,6 +184,7 @@ class StatusEffectRegistry:
         defaults = [
             PowerEffect(), DexterityEffect(), WeakEffect(), VulnerableEffect(),
             LightningEffect(), DrawNextEffect(), GainPowerAtTurnEndEffect(),
+            ThornsEffect(),
         ]
         for eff in defaults:
             cls._effects[eff.name] = eff

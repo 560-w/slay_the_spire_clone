@@ -45,6 +45,12 @@ class CardEffects:
         # 需求9: 记录伤害日志
         if hasattr(battle, "log_damage"):
             battle.log_damage(source.name, target.name, actual)
+        # 荆棘反伤（无视护甲，直接扣血）
+        thorns = target.buffs.get("荆棘", 0)
+        if thorns > 0 and source.current_hp > 0:
+            recoil = min(thorns, source.current_hp)
+            source.current_hp -= recoil
+            logger.info("[CardEffects] %s 受到 %s 荆棘反伤 %d", source.name, target.name, recoil)
         return actual
 
     @staticmethod

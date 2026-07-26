@@ -76,23 +76,25 @@ class MapNode:
 
 
 class Map:
-    """地图生成器（两页结构）。
+    """地图生成器（六页结构）。
 
     生成规则:
-    第一页 (page=0):
-    - Layer 0~4: 正常随机生成（战斗/精英/商店/篝火）
+    第 1~5 页:
+    - Layer 0~4: 正常随机生成（战斗/精英/商店/篝火/事件）
     - Layer 5: 篝火
     - Layer 6: 宝箱房（固定 1 个，作为页间衔接点）
 
-    第二页 (page=1):
-    - Layer 0: 宝箱房（固定 1 个，已访问状态，代表玩家从此进入第二页）
-    - Layer 1~4: 正常随机生成
+    第 6 页（最终页）:
+    - Layer 0: 宝箱房（固定 1 个，已访问状态，代表玩家从此进入）
+    - Layer 1~4: 正常随机生成（难度最高）
     - Layer 5: 篝火
     - Layer 6: Boss（固定 1 个）
 
     连接: 每个节点连接下一层 position 最接近的 1~2 个节点
     玩家从第一页 Layer 0 开始，每行只能选一个节点前进
     """
+
+    TOTAL_PAGES: int = 6
 
     def __init__(
         self, num_layers: int = 7, seed: Optional[int] = None
@@ -102,8 +104,8 @@ class Map:
         self.nodes: List[MapNode] = []
         self.current_node_id: Optional[str] = None
         self._counter: int = 0
-        self.current_page: int = 1  # 当前页（1 或 2）
-        self.page1_completed: bool = False  # 第一页是否完成
+        self.current_page: int = 1  # 当前页码（1~6）
+        self.page_completed: bool = False  # 当前页是否完成（宝箱/Boss 已访问）
 
         if seed is not None:
             random.seed(seed)
@@ -120,9 +122,9 @@ class Map:
         self.nodes = []
         self.current_node_id = None
         self.current_page = 1
-        self.page1_completed = False
+        self.page_completed = False
 
-        layer_nodes = self._generate_page_layers()
+        layer_nodes = self._generate_page_layers(page_num=1)
         # 第一页最后一层是宝箱房
         for node in layer_nodes[-1]:
             node.room_type = RoomType.TREASURE
@@ -132,40 +134,93 @@ class Map:
             node.accessible = True
 
         logger.info(
-            "[Map] 第一页地图生成完成: %d 层, %d 个节点",
-            self.num_layers, len(self.nodes),
+            "[Map] 第 %d 页地图生成完成: %d 层, %d 个节点",
+            self.current_page, self.num_layers, len(self.nodes),
         )
 
-    def generate_page2(self) -> None:
-        """生成第二页地图（Layer 0 宝箱入口 + Layer 1~5 随机 + Layer 6 Boss）。
+    def _generate_mid_page(self, page_num: int) -> None:
+        """生成中间页地图（第 2~5 页，统一结构）。
 
-        清空第一页节点，重新生成第二页。
+        Layer 0: 宝箱入口（已访问）
+        Layer 1~4: 随机
+        Layer 5: 篝火
+        Layer 6: 宝箱房（下一页入口）
         """
         self.nodes = []
         self.current_node_id = None
-        self.current_page = 2
-        self.page1_completed = True
+        self.current_page = page_num
+        self.page_completed = False
 
-        layer_nodes = self._generate_page_layers(layer0_count=1)
-        # 第二页第 0 层是宝箱房（已访问状态，作为入口）
+        layer_nodes = self._generate_page_layers(page_num=page_num, layer0_count=1)
+        # 第 0 层是宝箱房入口（已访问状态）
         for node in layer_nodes[0]:
             node.room_type = RoomType.TREASURE
             node.visited = True
-        # 第二页最后一层是 Boss
+        # 最后一层是宝箱房（通往下页）
         for node in layer_nodes[-1]:
-            node.room_type = RoomType.BOSS
+            node.room_type = RoomType.TREASURE
 
-        # 第二页第 1 层设为 accessible（玩家从入口宝箱房出发）
+        # 第 1 层设为 accessible
         for node in layer_nodes[1]:
             node.accessible = True
 
         logger.info(
-            "[Map] 第二页地图生成完成: %d 层, %d 个节点",
+            "[Map] 第 %d 页地图生成完成: %d 层, %d 个节点",
+            page_num, self.num_layers, len(self.nodes),
+        )
+
+    def _generate_final_page(self) -> None:
+        """生成最终页地图（第 6 页，末尾是 Boss）。
+
+        Layer 0: 宝箱入口（已访问）
+        Layer 1~4: 随机（最高难度）
+        Layer 5: 篝火
+        Layer 6: Boss
+        """
+        self.nodes = []
+        self.current_node_id = None
+        self.current_page = self.TOTAL_PAGES
+        self.page_completed = False
+
+        layer_nodes = self._generate_page_layers(page_num=self.TOTAL_PAGES, layer0_count=1)
+        # 第 0 层是宝箱房入口（已访问状态）
+        for node in layer_nodes[0]:
+            node.room_type = RoomType.TREASURE
+            node.visited = True
+        # 最后一层是 Boss
+        for node in layer_nodes[-1]:
+            node.room_type = RoomType.BOSS
+
+        # 第 1 层设为 accessible
+        for node in layer_nodes[1]:
+            node.accessible = True
+
+        logger.info(
+            "[Map] 最终页地图生成完成: %d 层, %d 个节点",
             self.num_layers, len(self.nodes),
         )
 
-    def _generate_page_layers(self, layer0_count: int = 0) -> List[List[MapNode]]:
+    def generate_next_page(self) -> None:
+        """生成下一页地图。
+
+        当前页宝箱房完成后调用，自动判断生成中间页还是最终页。
+        """
+        next_page = self.current_page + 1
+        if next_page >= self.TOTAL_PAGES:
+            self._generate_final_page()
+        else:
+            self._generate_mid_page(next_page)
+
+    def generate_page2(self) -> None:
+        """生成第二页（兼容旧接口，内部调用 generate_next_page）。"""
+        self.generate_next_page()
+
+    def _generate_page_layers(self, page_num: int = 1, layer0_count: int = 0) -> List[List[MapNode]]:
         """生成单页的各层节点（含类型分配、连接、可达性）。
+
+        Args:
+            page_num: 当前页码（1~6），影响房间类型概率。
+            layer0_count: 第0层固定节点数（0=随机）。
 
         Returns:
             该页的各层节点列表。
@@ -192,8 +247,8 @@ class Map:
                 self.nodes.append(node)
             layer_nodes.append(nodes_in_layer)
 
-        # 分配房间类型（中间层随机）
-        self._assign_room_types(layer_nodes)
+        # 分配房间类型（中间层随机，难度随页码递增）
+        self._assign_room_types(layer_nodes, page_num)
 
         # 连接相邻层
         for layer_idx in range(len(layer_nodes) - 1):
@@ -207,18 +262,23 @@ class Map:
 
         return layer_nodes
 
-    def _assign_room_types(self, layer_nodes: List[List[MapNode]]) -> None:
-        """分配单页内的房间类型。
+    def _assign_room_types(self, layer_nodes: List[List[MapNode]], page_num: int = 1) -> None:
+        """分配单页内的房间类型，难度随页码递增。
 
-        - Layer 0: 全部战斗（第一页）/ 宝箱房（第二页，已在 _generate 中设置）
+        - Layer 0: 全部战斗（第一页）/ 宝箱房（第二页及以后，已在 _generate 中设置）
         - 中间层(1 ~ num_layers-3): 随机商店/精英/事件/战斗
         - Layer num_layers-2: 全部篝火
-        - Layer num_layers-1: 宝箱房（第一页）/ Boss（第二页，已在 _generate 中设置）
+        - Layer num_layers-1: 宝箱房（非最终页）/ Boss（最终页，已在 _generate 中设置）
+
+        页码影响:
+        - 第 1~2 页: 精英 1~2 个，商店 1~2 个
+        - 第 3~4 页: 精英 2~3 个，商店 1~2 个
+        - 第 5~6 页: 精英 2~4 个，商店 1~2 个
         """
         num_layers = len(layer_nodes)
         # 固定层
         for node in layer_nodes[0]:
-            if node.room_type == RoomType.BATTLE:  # 第二页入口已被设为 TREASURE
+            if node.room_type == RoomType.BATTLE:  # 后续页入口已被设为 TREASURE
                 node.room_type = RoomType.BATTLE
         for node in layer_nodes[num_layers - 2]:
             node.room_type = RoomType.CAMPFIRE
@@ -229,30 +289,44 @@ class Map:
             for node in layer_nodes[layer_idx]:
                 mid_coords.append((layer_idx, node.position))
 
-        if mid_coords:
-            # 随机抽 1~2 个作商店
-            num_shops = random.randint(1, min(2, max(1, len(mid_coords) // 3)))
-            shop_coords = set(random.sample(mid_coords, num_shops))
-            remaining = [c for c in mid_coords if c not in shop_coords]
-            # 随机抽 1~2 个作精英
-            num_elites = random.randint(1, min(2, max(1, len(remaining) // 3))) if remaining else 0
-            elite_coords = set(random.sample(remaining, num_elites)) if num_elites > 0 else set()
-            remaining2 = [c for c in remaining if c not in elite_coords]
-            # 随机抽 1 个作事件房
-            num_events = min(1, len(remaining2)) if remaining2 else 0
-            event_coords = set(random.sample(remaining2, num_events)) if num_events > 0 else set()
+        if not mid_coords:
+            return
 
-            for layer_idx in range(1, num_layers - 2):
-                for node in layer_nodes[layer_idx]:
-                    coord = (layer_idx, node.position)
-                    if coord in shop_coords:
-                        node.room_type = RoomType.SHOP
-                    elif coord in elite_coords:
-                        node.room_type = RoomType.ELITE
-                    elif coord in event_coords:
-                        node.room_type = RoomType.EVENT
-                    else:
-                        node.room_type = RoomType.BATTLE
+        # 根据页码调整精英数量
+        if page_num <= 2:
+            min_elites, max_elites = 1, 2
+        elif page_num <= 4:
+            min_elites, max_elites = 2, 3
+        else:
+            min_elites, max_elites = 2, 4
+
+        # 随机抽 1~2 个作商店
+        num_shops = random.randint(1, min(2, max(1, len(mid_coords) // 3)))
+        shop_coords = set(random.sample(mid_coords, num_shops))
+        remaining = [c for c in mid_coords if c not in shop_coords]
+
+        # 随机抽精英
+        max_possible = min(max_elites, len(remaining))
+        min_possible = min(min_elites, max_possible)
+        num_elites = random.randint(min_possible, max_possible) if remaining else 0
+        elite_coords = set(random.sample(remaining, num_elites)) if num_elites > 0 else set()
+        remaining2 = [c for c in remaining if c not in elite_coords]
+
+        # 随机抽 1 个作事件房
+        num_events = min(1, len(remaining2)) if remaining2 else 0
+        event_coords = set(random.sample(remaining2, num_events)) if num_events > 0 else set()
+
+        for layer_idx in range(1, num_layers - 2):
+            for node in layer_nodes[layer_idx]:
+                coord = (layer_idx, node.position)
+                if coord in shop_coords:
+                    node.room_type = RoomType.SHOP
+                elif coord in elite_coords:
+                    node.room_type = RoomType.ELITE
+                elif coord in event_coords:
+                    node.room_type = RoomType.EVENT
+                else:
+                    node.room_type = RoomType.BATTLE
 
     def _connect_by_position(self, node: MapNode, next_layer: List[MapNode]) -> None:
         """连接下一层 position 最接近的 1~2 个节点（减少路线交叉）。

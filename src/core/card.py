@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from .entity import Entity
@@ -28,6 +29,13 @@ if TYPE_CHECKING:
     from ..controllers.battle import BattleController
 
 logger = logging.getLogger(__name__)
+
+
+class CardRarity(Enum):
+    """卡牌稀有度枚举。"""
+    COMMON = "普通"
+    UNCOMMON = "罕见"
+    RARE = "稀有"
 
 
 class Card(ABC):
@@ -99,6 +107,7 @@ class Card(ABC):
         self.is_x_cost: bool = is_x_cost
         self.auto_play_end_of_turn: bool = auto_play_end_of_turn
         self.upgraded: bool = False
+        self.rarity: CardRarity = CardRarity.COMMON
 
         logger.debug(
             "[Card] 创建卡牌: %s (cost=%d, type=%s, needs_target=%s, "
@@ -184,4 +193,4 @@ class Card(ABC):
         if self.auto_play_end_of_turn:
             tags.append("自动打出")
         tag_str = f" [{','.join(tags)}]" if tags else ""
-        return f"[{self.card_type}] {self.name} (费用:{self.get_display_cost()}){tag_str} - {self.description}"
+        return f"[{self.rarity.value}][{self.card_type}] {self.name} (费用:{self.get_display_cost()}){tag_str} - {self.description}"

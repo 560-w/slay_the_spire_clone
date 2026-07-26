@@ -136,6 +136,197 @@ class UpgradeCardEvent(GameEvent):
 
 
 # ====================================================================== #
+# 事件 3: 变牌
+# ====================================================================== #
+class TransformCardEvent(GameEvent):
+    """变牌事件。
+
+    描述: 一个神秘的炼金术士向你展示了他的变形术，
+          可以把一张牌随机变成另一张牌。
+    选项:
+    - [变牌] 选择一张牌，随机变成另一张牌
+    - [离开] 不变化任何牌
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="炼金术士",
+            description="一位戴着高帽的炼金术士从炼金釜中抬起头，"
+                        "眼中闪烁着疯狂的光芒：'你的牌太普通了！让我帮你用炼金术转化它！'",
+        )
+        self.options = [
+            EventOption(
+                text="变牌（选择一张牌，随机变成另一张牌）",
+                callback=self._transform_card,
+                tooltip="选择一张牌，随机变成另一张牌",
+            ),
+            EventOption(
+                text="离开（不变化任何牌）",
+                callback=self._leave,
+                tooltip="安全离开",
+            ),
+        ]
+
+    def _transform_card(self, game: "GameController") -> None:
+        """选择一张牌随机变成另一张牌。
+
+        使用 pending_delete_card 机制让玩家选择要变的牌，
+        然后在回调中替换为新牌。
+        """
+        import random
+        from src.data.cards import ALL_REWARD_CARDS
+
+        cards = list(game.player.deck_pile)
+        if not cards:
+            game.message = "你的牌组是空的，没有牌可以变。"
+            logger.info("[变牌事件] 牌组为空")
+            return
+
+        game.pending_delete_card = True
+        game.message = "选择一张要变形的牌（点击卡牌确认）"
+        # 保存替换回调 - 在 confirm_event_card_action 中处理
+        # 这里我们需要扩展删除逻辑以支持变牌
+        def transform_callback(card_index):
+            import random
+            from src.data.cards import ALL_REWARD_CARDS
+            if card_index >= 0 and card_index < len(game.player.deck_pile):
+                old_card = game.player.deck_pile.pop(card_index)
+                new_card_cls = random.choice(ALL_REWARD_CARDS)
+                new_card = new_card_cls()
+                game.player.deck_pile.append(new_card)
+                game.message = f"{old_card.name} 变成了 {new_card.name}！"
+                logger.info("[变牌事件] %s → %s", old_card.name, new_card.name)
+            else:
+                game.message = "你谢绝了炼金术士的提议，继续前行。"
+
+        game._event_transform_callback = transform_callback
+        logger.info("[变牌事件] 等待玩家选择要变的牌，牌组共 %d 张", len(cards))
+
+    def _leave(self, game: "GameController") -> None:
+        """安全离开。"""
+        game.message = "你婉拒了炼金术士，继续前行。"
+        logger.info("[变牌事件] 玩家选择离开")
+
+
+# ====================================================================== #
+# 事件 4: 血换金币
+# ====================================================================== #
+class BloodGoldEvent(GameEvent):
+    """血换金币事件。
+
+    描述: 一个阴暗的祭坛，上面刻着古老的符文。
+          将你的鲜血滴在祭坛上，它会回馈你金币。
+    选项:
+    - [献祭] 失去 12% 最大 HP，获得 50~80 金币
+    - [离开] 不献祭，安全离开
+    """
+
+    HP_COST_PCT: float = 0.12
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="血之祭坛",
+            description="一个由黑色石头砌成的祭坛出现在你面前，"
+                        "祭坛中央的石碗里还残留着暗红色的血迹。"
+                        "一个低沉的声音在你耳边低语：'献上你的鲜血，获取财富。'",
+        )
+        self.options = [
+            EventOption(
+                text=f"献祭（失去 {int(self.HP_COST_PCT * 100)}% 生命，获得 50~80 金币）",
+                callback=self._sacrifice,
+                tooltip="失去生命换取金币",
+            ),
+            EventOption(
+                text="离开（不献祭，安全离开）",
+                callback=self._leave,
+                tooltip="安全离开",
+            ),
+        ]
+
+    def _sacrifice(self, game: "GameController") -> None:
+        """失去生命，获得金币。"""
+        import random
+
+        hp_loss = int(game.player.max_hp * self.HP_COST_PCT)
+        actual_loss = min(hp_loss, game.player.current_hp - 1)  # 至少留 1 HP
+        if actual_loss <= 0:
+            game.message = "你太虚弱了，无法承受献祭。"
+            logger.info("[血之祭坛] 玩家 HP 不足，无法献祭")
+            return
+
+        game.player.current_hp -= actual_loss
+        gold_gain = random.randint(50, 80)
+        game.gold += gold_gain
+        game.message = f"你献祭了 {actual_loss} 点生命，获得了 {gold_gain} 金币！"
+        logger.info("[血之祭坛] 失去 %d HP，获得 %d 金币", actual_loss, gold_gain)
+
+    def _leave(self, game: "GameController") -> None:
+        """安全离开。"""
+        game.message = "你无视了祭坛的低语，继续前行。"
+        logger.info("[血之祭坛] 玩家选择离开")
+
+
+# ====================================================================== #
+# 事件 5: 诅咒之书
+# ====================================================================== #
+class CursedTomeEvent(GameEvent):
+    """诅咒之书事件。
+
+    描述: 一本被锁链缠绕的古书静静躺在石台上。
+          阅读它会带来力量，但需要付出生命的代价。
+    选项:
+    - [阅读] 失去 20% 最大 HP，获得一张稀有牌
+    - [离开] 不阅读，安全离开
+    """
+
+    HP_COST_PCT: float = 0.20
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="诅咒之书",
+            description="一本厚重的古书被锈迹斑斑的铁链锁在石台上，"
+                        "书页之间渗出微弱的紫色光芒。"
+                        "你感到一股强烈的冲动，想要翻开它…",
+        )
+        self.options = [
+            EventOption(
+                text=f"阅读（失去 {int(self.HP_COST_PCT * 100)}% 生命，获得一张稀有牌）",
+                callback=self._read,
+                tooltip="失去生命，获得稀有卡牌",
+            ),
+            EventOption(
+                text="离开（不阅读，安全离开）",
+                callback=self._leave,
+                tooltip="安全离开",
+            ),
+        ]
+
+    def _read(self, game: "GameController") -> None:
+        """失去生命，获得稀有牌。"""
+        import random
+        from src.data.cards import RARE_CARDS
+
+        hp_loss = int(game.player.max_hp * self.HP_COST_PCT)
+        actual_loss = min(hp_loss, game.player.current_hp - 1)  # 至少留 1 HP
+        if actual_loss <= 0:
+            game.message = "你太虚弱了，无法承受诅咒的力量。"
+            logger.info("[诅咒之书] 玩家 HP 不足，无法阅读")
+            return
+
+        game.player.current_hp -= actual_loss
+        new_card_cls = random.choice(RARE_CARDS)
+        new_card = new_card_cls()
+        game.player.deck_pile.append(new_card)
+        game.message = f"你翻开古书，受到了魔法的诅咒（-{actual_loss} HP），但获得了 {new_card.name}！"
+        logger.info("[诅咒之书] 失去 %d HP，获得 %s", actual_loss, new_card.name)
+
+    def _leave(self, game: "GameController") -> None:
+        """安全离开。"""
+        game.message = "你压下了好奇心，从古书旁走过。"
+        logger.info("[诅咒之书] 玩家选择离开")
+
+
+# ====================================================================== #
 # 事件池
 # ====================================================================== #
-EVENT_POOL = [DeleteCardEvent, UpgradeCardEvent]
+EVENT_POOL = [DeleteCardEvent, UpgradeCardEvent, TransformCardEvent, BloodGoldEvent, CursedTomeEvent]

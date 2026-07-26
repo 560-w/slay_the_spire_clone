@@ -29,7 +29,7 @@ from src.core.map import Map, MapNode, RoomType
 from src.core.player import Player
 from src.core.card import Card
 from src.data.cards import create_starter_deck
-from src.data.enemies import create_test_enemies
+from src.data.enemies import create_enemies_for_act
 
 if TYPE_CHECKING:
     from src.controllers.battle import BattleController
@@ -76,9 +76,13 @@ class GameController:
         # 奖励相关
         self.reward_cards: List[Card] = []
         self.reward_gold: int = 0
+        self.reward_relic = None  # Boss 遗物
 
         # 商店相关
         self.shop_cards: List[tuple[Card, int]] = []  # (卡牌, 价格)
+        self.shop_relic = None  # 商店遗物
+        self.shop_relic_price: int = 0
+        self.shop_remove_price: int = 75
 
         # 宝箱房相关
         self.treasure_gold: int = 0
@@ -88,6 +92,7 @@ class GameController:
         self.current_event = None  # GameEvent
         self.pending_delete_card: bool = False
         self.pending_upgrade_card: bool = False
+        self._event_transform_callback = None  # 变牌事件回调
 
         # 多幕相关
         self.current_act: int = 1
@@ -126,6 +131,8 @@ class GameController:
 
         # 移动到节点
         self.game_map.move_to_node(node_id)
+        # 统计已清理楼层
+        self.player.floors_cleared += 1
 
         # 根据节点类型切换状态
         if node.room_type == RoomType.BATTLE:
@@ -186,8 +193,8 @@ class GameController:
         # 从 deck_pile 加载到 draw_pile
         self._load_deck_to_draw_pile()
 
-        # 生成敌人
-        enemies = create_test_enemies(elite=is_elite, boss=is_boss)
+        # 生成敌人（根据当前 Act 和难度）
+        enemies = create_enemies_for_act(act=self.current_act, elite=is_elite, boss=is_boss)
 
         self.battle = BattleController(player=self.player, enemies=enemies)
         self.battle.start_battle()
@@ -210,7 +217,17 @@ class GameController:
             logger.info("[Game] 玩家阵亡，游戏结束")
             return
 
-        # 胜利：进入奖励阶段
+        # 胜利：统计击杀数
+        self.player.total_kills += len([e for e in self.battle.enemies if not e.is_alive()])
+
+        # 胜利：先触发遗物 on_combat_end 钩子
+        for relic in self.player.relics:
+            try:
+                relic.on_combat_end(self.player, self.battle)
+            except Exception as e:
+                logger.warning("[Game] 遗物 %s on_combat_end 异常: %s", relic.name, e)
+
+        # 胜利：战后回血
         is_elite = any(
             n.room_type == RoomType.ELITE and n.visited
             for n in self.game_map.nodes
@@ -221,39 +238,72 @@ class GameController:
             for n in self.game_map.nodes
             if n.node_id == self.game_map.current_node_id
         )
-
         if is_boss:
-            self.state = GameState.GAME_OVER
-            self.message = "恭喜！你击败了 Boss，通关成功！"
-            logger.info("[Game] Boss 击败，游戏通关！")
-            return
+            heal_amount = self.player.max_hp  # Boss 战后回满血
+        elif is_elite:
+            heal_amount = int(self.player.max_hp * 0.3)
+        else:
+            heal_amount = int(self.player.max_hp * 0.2)
+        actual_heal = min(heal_amount, self.player.max_hp - self.player.current_hp)
+        self.player.current_hp += actual_heal
+        if actual_heal > 0:
+            logger.info("[Game] 战后回血: +%d HP (当前 %d/%d)", actual_heal, self.player.current_hp, self.player.max_hp)
 
-        # 生成奖励
-        self._generate_reward(is_elite)
+        # 生成奖励（Boss 也走奖励流程，不掉落卡牌但给金币和遗物）
+        self._generate_reward(is_elite, is_boss)
         self.state = GameState.REWARD
-        self.message = f"战斗胜利！获得 {self.reward_gold} 金币，选择一张牌加入牌组"
+        if is_boss:
+            self.message = f"Boss 击败！回满 HP，获得 {self.reward_gold} 金币和 Boss 遗物"
+        else:
+            self.message = f"战斗胜利！回复 {actual_heal} HP，获得 {self.reward_gold} 金币，选择一张牌加入牌组"
 
-    def _generate_reward(self, is_elite: bool) -> None:
-        """生成战斗奖励（金币 + 三选一卡牌）。"""
-        from src.data.cards import (
-            Strike, Defend, Bash, Survivor, Offering,
-            MachineLearning, Whirlwind, Hologram, Domination, DarkShackles,
-        )
+    def _generate_reward(self, is_elite: bool, is_boss: bool = False) -> None:
+        """生成战斗奖励（金币 + 遗物 + 三选一卡牌）。
+
+        - 普通战斗: 15~25 金币，3 张卡牌（1 罕见 + 2 普通）
+        - 精英战斗: 30~45 金币，3 张卡牌（1 稀有 + 2 罕见）
+        - Boss 战斗: 50~80 金币，Boss 遗物，不选卡牌
+        """
+        from src.data.cards import COMMON_CARDS, UNCOMMON_CARDS, RARE_CARDS
+
+        self.reward_cards = []
+        self.reward_relic = None
 
         # 金币
-        if is_elite:
+        if is_boss:
+            self.reward_gold = random.randint(50, 80)
+        elif is_elite:
             self.reward_gold = random.randint(30, 45)
         else:
             self.reward_gold = random.randint(15, 25)
         self.gold += self.reward_gold
 
-        # 卡牌奖励：从可用卡池随机 3 张
-        card_pool = [
-            Strike, Defend, Bash, Survivor, Offering,
-            MachineLearning, Whirlwind, Hologram, Domination, DarkShackles,
-        ]
-        chosen_types = random.sample(card_pool, min(3, len(card_pool)))
-        self.reward_cards = [ct() for ct in chosen_types]
+        # Boss 遗物 + 2 张稀有卡牌可选
+        if is_boss:
+            from src.data.relics import BOSS_RELICS
+            self.reward_relic = random.choice(BOSS_RELICS)()
+            self.player.relics.append(self.reward_relic)
+            logger.info("[Game] Boss 遗物: %s", self.reward_relic.name)
+            # Boss 额外提供 2 张稀有卡牌可选
+            boss_card_pool = []
+            boss_card_pool.append(random.choice(RARE_CARDS))
+            boss_card_pool.append(random.choice(RARE_CARDS))
+            self.reward_cards = [ct() for ct in boss_card_pool]
+            return
+
+        # 卡牌奖励（按稀有度权重）
+        if is_elite:
+            # 精英：1 稀有 + 2 罕见
+            pool = []
+            pool.append(random.choice(RARE_CARDS))
+            pool.extend(random.choices(UNCOMMON_CARDS, k=2))
+        else:
+            # 普通：1 罕见 + 2 普通
+            pool = []
+            pool.append(random.choice(UNCOMMON_CARDS))
+            pool.extend(random.choices(COMMON_CARDS, k=2))
+        random.shuffle(pool)
+        self.reward_cards = [ct() for ct in pool]
 
         logger.info(
             "[Game] 生成奖励: %d 金币, %d 张卡牌可选",
@@ -278,17 +328,36 @@ class GameController:
             self.message = "跳过选牌"
 
         self.reward_cards.clear()
+        self.reward_relic = None
         self.return_to_map()
 
     # ------------------------------------------------------------------ #
     # 篝火
     # ------------------------------------------------------------------ #
     def campfire_rest(self) -> None:
-        """篝火休息：回复 30% 最大生命值。"""
+        """篝火休息：回复 30% 最大生命值。
+
+        遗物加成:
+        - 皇家枕头: 额外回复 15% 最大 HP。
+        - 捕梦网: 休息时获得 1 张随机卡牌。
+        """
         assert self.state == GameState.CAMPFIRE, "[Game] 当前不在篝火状态"
-        heal_amount = int(self.player.max_hp * 0.3)
+
+        # 皇家枕头：额外 15% 回复
+        from src.data.relics import RoyalPillow, DreamCatcher
+        bonus_pct = 0.15 if any(isinstance(r, RoyalPillow) for r in self.player.relics) else 0.0
+        heal_amount = int(self.player.max_hp * (0.3 + bonus_pct))
         actual = self.player.heal(heal_amount)
         self.message = f"休息回复了 {actual} 点生命值"
+
+        # 捕梦网：获得 1 张随机卡牌
+        if any(isinstance(r, DreamCatcher) for r in self.player.relics):
+            from src.data.cards import COMMON_CARDS
+            new_card = random.choice(COMMON_CARDS)()
+            self.player.deck_pile.append(new_card)
+            self.message += f"（捕梦网：获得 {new_card.name}）"
+            logger.info("[Game] 捕梦网: 获得卡牌 %s", new_card.name)
+
         logger.info("[Game] 篝火休息: 回复 %d HP", actual)
         self.return_to_map()
 
@@ -296,8 +365,18 @@ class GameController:
         """篝火升级一张牌。
 
         修复（需求2）: 从 deck_pile 遍历升级。
+        遗物限制: 融合之锤阻止篝火升级。
         """
         assert self.state == GameState.CAMPFIRE, "[Game] 当前不在篝火状态"
+
+        # 融合之锤：不能升级
+        from src.data.relics import FusionHammer
+        if any(isinstance(r, FusionHammer) for r in self.player.relics):
+            self.message = "融合之锤：无法在篝火升级卡牌！"
+            logger.info("[Game] 融合之锤阻止篝火升级")
+            self.return_to_map()
+            return
+
         assert 0 <= card_index < len(self.player.deck_pile), (
             f"[Game] 升级卡牌索引越界: {card_index}"
         )
@@ -311,24 +390,59 @@ class GameController:
     # 商店
     # ------------------------------------------------------------------ #
     def _enter_shop(self) -> None:
-        """进入商店时生成商品并切换状态。"""
-        from src.data.cards import (
-            Strike, Defend, Bash, Survivor, Offering,
-            MachineLearning, Whirlwind, Hologram, Domination, DarkShackles,
-        )
-        card_pool = [
-            Strike, Defend, Bash, Survivor, Offering,
-            MachineLearning, Whirlwind, Hologram, Domination, DarkShackles,
+        """进入商店时生成商品并切换状态。
+
+        商店内容：
+        - 3 张卡牌（含稀有度关联价格）
+        - 1 个遗物（非 Boss 遗物）
+        - 删牌服务（75 金币）
+        """
+        from src.data.cards import COMMON_CARDS, UNCOMMON_CARDS, RARE_CARDS
+        from src.data.relics import NON_BOSS_RELICS
+
+        # 卡牌：1 普通 + 1 罕见 + 1 稀有
+        card_cls_list = [
+            random.choice(COMMON_CARDS),
+            random.choice(UNCOMMON_CARDS),
+            random.choice(RARE_CARDS),
         ]
-        chosen_types = random.sample(card_pool, min(3, len(card_pool)))
+        random.shuffle(card_cls_list)
         self.shop_cards = []
-        for ct in chosen_types:
+        for ct in card_cls_list:
             card = ct()
-            price = random.randint(50, 150)
+            # 价格按稀有度
+            if card.rarity and card.rarity.value == "稀有":
+                price = random.randint(70, 110)
+            elif card.rarity and card.rarity.value == "罕见":
+                price = random.randint(50, 80)
+            else:
+                price = random.randint(30, 55)
             self.shop_cards.append((card, price))
+
+        # 遗物（1 个随机非 Boss 遗物，排除已拥有）
+        self.shop_relic = None
+        self.shop_relic_price = 0
+        owned_names = {r.name for r in self.player.relics}
+        available = [r for r in NON_BOSS_RELICS if r().name not in owned_names]
+        if available:
+            relic_cls = random.choice(available)
+            self.shop_relic = relic_cls()
+            self.shop_relic_price = random.randint(120, 160)
+
+        # 微笑面具：删牌费用减半（向下取整）
+        from src.data.relics import SmilingMask
+        self.shop_remove_price = 25 if any(
+            isinstance(r, SmilingMask) for r in self.player.relics
+        ) else 50
+
         self.state = GameState.SHOP
-        self.message = f"商店：你有 {self.gold} 金币，选择要购买的卡牌"
-        logger.info("[Game] 进入商店: %d 件商品", len(self.shop_cards))
+        self.message = f"商店：你有 {self.gold} 金币，选择要购买的物品"
+        logger.info(
+            "[Game] 进入商店: %d 件卡牌商品, 遗物=%s, 删牌=%d 金币",
+            len(self.shop_cards),
+            self.shop_relic.name if self.shop_relic else "无",
+            self.shop_remove_price,
+        )
 
     def shop_buy_card(self, card_idx: int) -> bool:
         """商店购买卡牌。
@@ -350,24 +464,77 @@ class GameController:
         logger.info("[Game] 商店购买卡牌: %s (%d 金币)", card.name, price)
         return True
 
+    def shop_buy_relic(self) -> bool:
+        """商店购买遗物。"""
+        assert self.state == GameState.SHOP, "[Game] 当前不在商店状态"
+        if self.shop_relic is None:
+            self.message = "遗物已售罄"
+            return False
+        if self.gold < self.shop_relic_price:
+            self.message = "金币不足！"
+            return False
+        self.gold -= self.shop_relic_price
+        self.player.relics.append(self.shop_relic)
+        self.message = f"购买了遗物 {self.shop_relic.name}，花费 {self.shop_relic_price} 金币"
+        logger.info("[Game] 商店购买遗物: %s (%d 金币)", self.shop_relic.name, self.shop_relic_price)
+        self.shop_relic = None
+        self.shop_relic_price = 0
+        return True
+
+    def shop_remove_card(self, card_index: int) -> bool:
+        """商店删牌服务"""
+        assert self.state == GameState.SHOP, "[Game] 当前不在商店状态"
+        if self.gold < self.shop_remove_price:
+            self.message = "金币不足！"
+            return False
+        if not (0 <= card_index < len(self.player.deck_pile)):
+            self.message = "无效的卡牌"
+            return False
+        self.gold -= self.shop_remove_price
+        card = self.player.deck_pile[card_index]
+        self.player.deck_pile.remove(card)
+        self.message = f"删除了 {card.name}，花费 {self.shop_remove_price} 金币"
+        logger.info("[Game] 商店删牌: %s (%d 金币)", card.name, self.shop_remove_price)
+        return True
+
     def shop_leave(self) -> None:
         """离开商店。"""
         assert self.state == GameState.SHOP, "[Game] 当前不在商店状态"
         self.shop_cards.clear()
+        self.shop_relic = None
+        self.shop_relic_price = 0
         self.return_to_map()
 
     # ------------------------------------------------------------------ #
     # 宝箱房
     # ------------------------------------------------------------------ #
     def _enter_treasure(self) -> None:
-        """进入宝箱房：获得 30~70 金币 + 1 个随机遗物。"""
-        from src.data.relics import Vajra, GamblersChip
+        """进入宝箱房：获得 30~70 金币 + 1 个随机遗物。
+
+        遗物副作用:
+        - 黑暗之球: 宝箱房不给遗物。
+        - 诅咒钥匙: 宝箱房金币减半。
+        """
+        from src.data.relics import NON_BOSS_RELICS, DarkOrb, CursedKey
+
+        has_dark_orb = any(isinstance(r, DarkOrb) for r in self.player.relics)
+        has_cursed_key = any(isinstance(r, CursedKey) for r in self.player.relics)
 
         self.treasure_gold = random.randint(30, 70)
+        if has_cursed_key:
+            self.treasure_gold = self.treasure_gold // 2
         self.gold += self.treasure_gold
 
-        # 随机选 1 个遗物（玩家尚未拥有的）
-        relic_pool = [Vajra, GamblersChip]
+        # 黑暗之球：不给遗物
+        if has_dark_orb:
+            self.treasure_relic = None
+            self.state = GameState.TREASURE
+            self.message = f"宝箱！获得 {self.treasure_gold} 金币（黑暗之球：无遗物）"
+            logger.info("[Game] 宝箱房: %d 金币 (黑暗之球)", self.treasure_gold)
+            return
+
+        # 随机选 1 个遗物（玩家尚未拥有的，非 Boss 遗物）
+        relic_pool = NON_BOSS_RELICS
         owned_names = {r.name for r in self.player.relics}
         available = [r for r in relic_pool if r().name not in owned_names]
         if available:
@@ -392,19 +559,17 @@ class GameController:
     def confirm_treasure(self) -> None:
         """确认宝箱奖励，返回地图。
 
-        若是第一页宝箱房，生成第二页地图。
+        宝箱房确认后：生成下一页地图（第1~5页），或返回地图（最终页）。
         """
         assert self.state == GameState.TREASURE, "[Game] 当前不在宝箱状态"
         self.treasure_gold = 0
         self.treasure_relic = None
-        # 判断是否为第一页宝箱房
-        if not self.game_map.page1_completed:
-            # 第一页宝箱房完成，生成第二页
-            self.game_map.generate_page2()
-            self.state = GameState.MAP
-            self.message = "进入第二页地图！选择下一个房间前进"
-            logger.info("[Game] 第一页完成，生成第二页地图")
-            return
+        self.game_map.page_completed = True
+        if self.game_map.current_page < self.game_map.TOTAL_PAGES:
+            self.game_map.generate_next_page()
+            self.message = f"进入第 {self.game_map.current_page} 页地图！选择下一个房间前进"
+            logger.info("[Game] 第 %d 页完成，生成第 %d 页地图",
+                         self.game_map.current_page - 1, self.game_map.current_page)
         self.return_to_map()
 
     # ------------------------------------------------------------------ #
@@ -432,12 +597,18 @@ class GameController:
             self.return_to_map()
 
     def confirm_event_card_action(self, card_index: int = -1) -> None:
-        """事件卡牌选择确认（删除/升级）。
+        """事件卡牌选择确认（删除/升级/变牌）。
 
         Args:
             card_index: 选中的卡牌索引（-1 表示取消）。
         """
-        if self.pending_delete_card:
+        if self._event_transform_callback:
+            # 变牌事件
+            callback = self._event_transform_callback
+            self._event_transform_callback = None
+            self.pending_delete_card = False
+            callback(card_index)
+        elif self.pending_delete_card:
             self.pending_delete_card = False
             if card_index >= 0 and card_index < len(self.player.deck_pile):
                 card = self.player.deck_pile[card_index]
@@ -474,6 +645,10 @@ class GameController:
             "reward_cards": self.reward_cards,
             "reward_gold": self.reward_gold,
             "battle": self.battle,
+            "reward_relic": self.reward_relic,
+            "shop_relic": self.shop_relic,
+            "shop_relic_price": self.shop_relic_price,
+            "shop_remove_price": self.shop_remove_price,
             "treasure_gold": self.treasure_gold,
             "treasure_relic": self.treasure_relic,
             "current_event": self.current_event,

@@ -1,15 +1,9 @@
 """cards.py: 具体卡牌定义。
 
 包含:
-- Strike 打击：单目标攻击牌，6 伤害
-- Defend 防御：获得 5 护甲
-- Bash 重击：8 伤害 + 2 易伤
-- 生存者：7 护甲 + 弃1张手牌（PendingCardSelection）
-- 祭品：失去6生命 + 抽3张 + 获得3能量
-- 机器学习：能力牌，每回合多抽1张（回合多抽 buff）
-- 灼伤：状态牌，不可打出，回合结束自动打出造成3伤害
-- 倾斜：X费，打出抽牌堆顶 X 张牌
-- 状态牌: Wound 伤口, Dazed 晕眩
+- 普通：Strike 打击, Defend 防御, Wound 伤口, Dazed 晕眩, Burn 灼伤, IronWave 铁壁波, PommelStrike 剑柄打击
+- 罕见：Bash 重击, Survivor 生存者, Hologram 全息影像, DarkShackles 黑暗镣铐, FlameBarrier 火焰屏障, ShrugItOff 耸肩无视
+- 稀有：Offering 祭品, MachineLearning 机器学习, Whirlwind 倾斜, Domination 主宰, Impervious 不可侵犯, DemonForm 恶魔形态
 
 设计原则:
 1. 攻击牌经 CardEffects.deal_damage 修正伤害。
@@ -24,7 +18,7 @@ import logging
 from typing import TYPE_CHECKING, Optional
 
 from src.core.buff_system import BuffSystem
-from src.core.card import Card
+from src.core.card import Card, CardRarity
 from src.core.card_effects import CardEffects
 from src.core.entity import Entity
 from src.core.pending_action import PendingCardSelection
@@ -36,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 # ====================================================================== #
-# 攻击牌
+# 普通攻击牌
 # ====================================================================== #
 class Strike(Card):
     """打击：单目标攻击牌，造成 6 点伤害，费用 1。"""
@@ -51,6 +45,7 @@ class Strike(Card):
             description=f"造成 {self.DAMAGE} 点伤害。",
             needs_target=True,
         )
+        self.rarity = CardRarity.COMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert target is not None, "[Strike] 攻击牌必须指定目标"
@@ -72,6 +67,7 @@ class Bash(Card):
             description=f"造成 {self.DAMAGE} 伤害，施加 {self.VULNERABLE_STACKS} 层易伤。",
             needs_target=True,
         )
+        self.rarity = CardRarity.UNCOMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert target is not None
@@ -80,8 +76,54 @@ class Bash(Card):
         CardEffects.add_buff(target, BuffSystem.BUFF_VULNERABLE, self.VULNERABLE_STACKS)
 
 
+class IronWave(Card):
+    """铁壁波：1c，造成 5 伤害，获得 5 护甲。"""
+
+    DAMAGE: int = 5
+    BLOCK: int = 5
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="铁壁波",
+            cost=1,
+            card_type=Card.TYPE_ATTACK,
+            description=f"造成 {self.DAMAGE} 伤害，获得 {self.BLOCK} 护甲。",
+            needs_target=True,
+        )
+        self.rarity = CardRarity.COMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert target is not None
+        assert battle is not None
+        CardEffects.deal_damage(battle, user, target, self.DAMAGE)
+        CardEffects.gain_block(battle, user, self.BLOCK)
+
+
+class PommelStrike(Card):
+    """剑柄打击：1c，造成 8 伤害，抽 1 张牌。"""
+
+    DAMAGE: int = 8
+    DRAW: int = 1
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="剑柄打击",
+            cost=1,
+            card_type=Card.TYPE_ATTACK,
+            description=f"造成 {self.DAMAGE} 伤害，抽 {self.DRAW} 张牌。",
+            needs_target=True,
+        )
+        self.rarity = CardRarity.COMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        assert target is not None
+        assert battle is not None
+        CardEffects.deal_damage(battle, user, target, self.DAMAGE)
+        CardEffects.draw_cards(user, self.DRAW)
+
+
 # ====================================================================== #
-# 技能牌
+# 普通技能牌
 # ====================================================================== #
 class Defend(Card):
     """防御：获得 5 护甲，费用 1。"""
@@ -95,6 +137,7 @@ class Defend(Card):
             card_type=Card.TYPE_SKILL,
             description=f"获得 {self.BLOCK} 点护甲。",
         )
+        self.rarity = CardRarity.COMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         CardEffects.gain_block(battle, user, self.BLOCK)
@@ -112,12 +155,11 @@ class Survivor(Card):
             card_type=Card.TYPE_SKILL,
             description=f"获得 {self.BLOCK} 点护挡。选择一张手牌丢弃。",
         )
+        self.rarity = CardRarity.UNCOMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert battle is not None
         CardEffects.gain_block(battle, user, self.BLOCK)
-        # 设置弃牌选择挂起动作
-        # 可选手牌 = 当前手牌（生存者已在处理区，不在手牌中）
         selectable = list(user.hand)
         if not selectable:
             logger.info("[Survivor] 无手牌可弃，跳过选择")
@@ -131,6 +173,49 @@ class Survivor(Card):
         )
 
 
+class ShrugItOff(Card):
+    """耸肩无视：1c，获得 8 护甲，抽 1 张牌。"""
+
+    BLOCK: int = 8
+    DRAW: int = 1
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="耸肩无视",
+            cost=1,
+            card_type=Card.TYPE_SKILL,
+            description=f"获得 {self.BLOCK} 点护甲，抽 {self.DRAW} 张牌。",
+        )
+        self.rarity = CardRarity.UNCOMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.gain_block(battle, user, self.BLOCK)
+        CardEffects.draw_cards(user, self.DRAW)
+
+
+class FlameBarrier(Card):
+    """火焰屏障：2c，获得 12 护甲，获得 3 层荆棘。"""
+
+    BLOCK: int = 12
+    THORNS: int = 3
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="火焰屏障",
+            cost=2,
+            card_type=Card.TYPE_SKILL,
+            description=f"获得 {self.BLOCK} 点护甲，获得 {self.THORNS} 层荆棘。",
+        )
+        self.rarity = CardRarity.UNCOMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.gain_block(battle, user, self.BLOCK)
+        CardEffects.add_buff(user, BuffSystem.BUFF_THORNS, self.THORNS)
+
+
+# ====================================================================== #
+# 稀有技能牌
+# ====================================================================== #
 class Offering(Card):
     """祭品：失去 6 生命，抽 3 张牌，获得 3 能量，费用 0。"""
 
@@ -145,11 +230,31 @@ class Offering(Card):
             card_type=Card.TYPE_SKILL,
             description=f"失去 {self.HP_LOSS} 生命，抽 {self.DRAW_COUNT} 张牌，获得 {self.ENERGY_GAIN} 点能量。",
         )
+        self.rarity = CardRarity.RARE
 
     def play(self, user, target=None, battle=None, x_value=0):
         CardEffects.lose_hp(user, self.HP_LOSS)
         CardEffects.draw_cards(user, self.DRAW_COUNT)
         CardEffects.gain_energy(user, self.ENERGY_GAIN)
+
+
+class Impervious(Card):
+    """不可侵犯：2c，获得 30 护甲。消耗。"""
+
+    BLOCK: int = 30
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="不可侵犯",
+            cost=2,
+            card_type=Card.TYPE_SKILL,
+            description=f"获得 {self.BLOCK} 点护甲。",
+            exhausts=True,
+        )
+        self.rarity = CardRarity.RARE
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.gain_block(battle, user, self.BLOCK)
 
 
 # ====================================================================== #
@@ -167,10 +272,85 @@ class MachineLearning(Card):
             card_type=Card.TYPE_POWER,
             description="每回合开始时多抽 1 张牌。",
         )
+        self.rarity = CardRarity.RARE
 
     def play(self, user, target=None, battle=None, x_value=0):
-        # 获得持久 buff「回合多抽」
         CardEffects.add_buff(user, BuffSystem.BUFF_DRAW_NEXT, self.DRAW_BUFF_STACKS)
+
+
+class DemonForm(Card):
+    """恶魔形态：3c，回合结束时获得 2 层力量。"""
+
+    POWER_GAIN: int = 2
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="恶魔形态",
+            cost=3,
+            card_type=Card.TYPE_POWER,
+            description=f"每回合结束时获得 {self.POWER_GAIN} 层力量。",
+        )
+        self.rarity = CardRarity.RARE
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.add_buff(user, BuffSystem.BUFF_GAIN_POWER_END, self.POWER_GAIN)
+
+
+class Inflame(Card):
+    """燃烧：1c，获得 2 层力量。"""
+
+    POWER_GAIN: int = 2
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="燃烧",
+            cost=1,
+            card_type=Card.TYPE_POWER,
+            description=f"获得 {self.POWER_GAIN} 层力量。",
+        )
+        self.rarity = CardRarity.UNCOMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.add_buff(user, BuffSystem.BUFF_POWER, self.POWER_GAIN)
+
+
+class Footwork(Card):
+    """步伐：1c，获得 3 层敏捷。"""
+
+    DEX_GAIN: int = 3
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="步伐",
+            cost=1,
+            card_type=Card.TYPE_POWER,
+            description=f"获得 {self.DEX_GAIN} 层敏捷。",
+        )
+        self.rarity = CardRarity.UNCOMMON
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.add_buff(user, BuffSystem.BUFF_DEXTERITY, self.DEX_GAIN)
+
+
+class Berserk(Card):
+    """狂暴：0c，获得 2 层力量 + 1 层易伤，回合结束时获得 1 层力量。"""
+
+    POWER_GAIN: int = 2
+    POWER_PER_TURN: int = 1
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="狂暴",
+            cost=0,
+            card_type=Card.TYPE_POWER,
+            description=f"获得 {self.POWER_GAIN} 层力量和 1 层易伤。每回合结束时获得 {self.POWER_PER_TURN} 层力量。",
+        )
+        self.rarity = CardRarity.RARE
+
+    def play(self, user, target=None, battle=None, x_value=0):
+        CardEffects.add_buff(user, BuffSystem.BUFF_POWER, self.POWER_GAIN)
+        CardEffects.add_buff(user, BuffSystem.BUFF_VULNERABLE, 1)
+        CardEffects.add_buff(user, BuffSystem.BUFF_GAIN_POWER_END, self.POWER_PER_TURN)
 
 
 # ====================================================================== #
@@ -187,9 +367,9 @@ class Wound(Card):
             description="不可打出。",
             playable=False,
         )
+        self.rarity = CardRarity.COMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
-        # 不可手动打出，但被自动打出（如倾斜）时无效果通过
         logger.info("[Wound] 伤口被自动打出，无效果")
 
 
@@ -204,18 +384,14 @@ class Dazed(Card):
             description="不可打出。占据手牌位。",
             playable=False,
         )
+        self.rarity = CardRarity.COMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
-        # 不可手动打出，但被自动打出（如倾斜）时无效果通过
         logger.info("[Dazed] 晕眩被自动打出，无效果")
 
 
 class Burn(Card):
-    """灼伤：状态牌，不能被打出，回合结束时若在手牌中自动打出造成 3 点伤害。
-
-    实现: playable=False + auto_play_end_of_turn=True
-    play() 效果: 对自己造成 3 点伤害（无视护甲）
-    """
+    """灼伤：状态牌，不能被打出，回合结束时若在手牌中自动打出造成 3 点伤害。"""
 
     DAMAGE: int = 3
 
@@ -228,9 +404,9 @@ class Burn(Card):
             playable=False,
             auto_play_end_of_turn=True,
         )
+        self.rarity = CardRarity.COMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
-        # 对自己造成伤害（无视护甲）
         CardEffects.lose_hp(user, self.DAMAGE)
 
 
@@ -238,11 +414,7 @@ class Burn(Card):
 # X费牌
 # ====================================================================== #
 class Whirlwind(Card):
-    """倾斜：X费，依次打出抽牌堆顶部的前 X 张牌。
-
-    X = 打出时消耗的所有能量。
-    自动打出时 X = 当前能量（不扣）。
-    """
+    """倾斜：X费，依次打出抽牌堆顶部的前 X 张牌。"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -252,6 +424,7 @@ class Whirlwind(Card):
             description="依次打出抽牌堆顶部的前 X 张牌（X 为本牌消耗的能量数）。",
             is_x_cost=True,
         )
+        self.rarity = CardRarity.RARE
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert battle is not None, "[Whirlwind] 需要 battle 引用"
@@ -259,7 +432,6 @@ class Whirlwind(Card):
         if x_value <= 0:
             logger.info("[Whirlwind] x_value=0，空效果")
             return
-        # 调用控制器的自动打牌接口（处理抽牌堆不足/嵌套）
         battle.auto_play_from_draw_top(x_value)
 
 
@@ -279,6 +451,7 @@ class Hologram(Card):
             description=f"获得 {self.BLOCK} 点格挡。选择弃牌堆中的一张牌加入手牌。",
             exhausts=True,
         )
+        self.rarity = CardRarity.UNCOMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert battle is not None
@@ -312,6 +485,7 @@ class Domination(Card):
 
     def __init__(self):
         super().__init__(name="主宰",cost=1,card_type=Card.TYPE_SKILL,description="使一名敌人获得1层易伤，然后你获得等同于其易伤层数的力量。",needs_target=True)
+        self.rarity = CardRarity.RARE
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert target is not None
@@ -328,6 +502,7 @@ class DarkShackles(Card):
 
     def __init__(self):
         super().__init__(name="黑暗镣铐",cost=0,card_type=Card.TYPE_SKILL,description=f"使一名敌人在本回合失去{self.POWER_LOSS}点力量。",needs_target=True)
+        self.rarity = CardRarity.UNCOMMON
 
     def play(self, user, target=None, battle=None, x_value=0):
         assert target is not None
@@ -366,3 +541,12 @@ def create_test_deck_with_new_cards() -> list[Card]:
         Survivor(), Offering(), MachineLearning(), Whirlwind(),
         Hologram(),
     ]
+
+
+# ====================================================================== #
+# 按稀有度分组的卡牌池（供奖励/商店使用）
+# ====================================================================== #
+COMMON_CARDS = [Strike, Defend, IronWave, PommelStrike]
+UNCOMMON_CARDS = [Bash, Survivor, Hologram, DarkShackles, ShrugItOff, FlameBarrier, Inflame, Footwork]
+RARE_CARDS = [Offering, MachineLearning, Whirlwind, Domination, Impervious, DemonForm, Berserk]
+ALL_REWARD_CARDS = COMMON_CARDS + UNCOMMON_CARDS + RARE_CARDS

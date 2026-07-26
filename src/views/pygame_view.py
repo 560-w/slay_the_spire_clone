@@ -514,12 +514,7 @@ class PygameView:
         back_text = self.font_small.render("点击空白处返回", True, COLOR_TEXT_DIM)
         self.screen.blit(back_text, ((WINDOW_WIDTH - back_text.get_width()) // 2, 65))
 
-        all_cards = (
-            list(game.player.draw_pile)
-            + list(game.player.hand)
-            + list(game.player.discard_pile)
-            + list(game.player.exhaust_pile)
-        )
+        all_cards = list(game.player.deck_pile)
         self.choice_rects = []
         card_w, card_h = 140, 180
         gap = 10
@@ -562,11 +557,14 @@ class PygameView:
     # ================================================================== #
     def _render_shop(self, game: "GameController") -> None:
         self.shop_rects = []
-        title = self.font_big.render("🏪 商店", True, COLOR_TEXT)
+        self.shop_relic_rect = pygame.Rect(0, 0, 0, 0)
+        self.shop_remove_rect = pygame.Rect(0, 0, 0, 0)
+        title = self.font_big.render("商店", True, COLOR_TEXT)
         self.screen.blit(title, ((WINDOW_WIDTH - title.get_width()) // 2, 30))
-        gold_text = self.font.render(f"💰 金币: {game.gold}", True, COLOR_GOLD)
+        gold_text = self.font.render(f"金币: {game.gold}", True, COLOR_GOLD)
         self.screen.blit(gold_text, ((WINDOW_WIDTH - gold_text.get_width()) // 2, 80))
 
+        # ── 卡牌商品 ──
         shop_cards = game.shop_cards
         n = len(shop_cards)
         card_w, card_h = 160, 240
@@ -590,11 +588,35 @@ class PygameView:
             lines = [desc[j:j + 8] for j in range(0, len(desc), 8)]
             for li, line in enumerate(lines[:3]):
                 self.blit_emoji_text(self.screen, line, (rect.x + 8, rect.y + 120 + li * 18), self.font_small, COLOR_TEXT_DIM)
-            price_text = self.font.render(f"💰 {price} 金币", True, COLOR_GOLD)
+            price_text = self.font.render(f"{price} 金币", True, COLOR_GOLD)
             self.screen.blit(price_text, (rect.x + 8, rect.y + 190))
 
+        # ── 遗物商品 ──
+        relic_y = y + card_h + 20
+        if game.shop_relic is not None:
+            relic = game.shop_relic
+            relic_w, relic_h = 400, 70
+            self.shop_relic_rect = pygame.Rect((WINDOW_WIDTH - relic_w) // 2, relic_y, relic_w, relic_h)
+            can_afford = game.gold >= game.shop_relic_price
+            color = COLOR_SHOP_CARD if can_afford else COLOR_DEAD
+            pygame.draw.rect(self.screen, color, self.shop_relic_rect, border_radius=8)
+            relic_text = self.font.render(f"遗物: {relic.name} - {relic.description}", True, COLOR_TEXT)
+            self.screen.blit(relic_text, (self.shop_relic_rect.x + 12, self.shop_relic_rect.y + 8))
+            price_text = self.font.render(f"{game.shop_relic_price} 金币", True, COLOR_GOLD)
+            self.screen.blit(price_text, (self.shop_relic_rect.x + 12, self.shop_relic_rect.y + 38))
+            relic_y += relic_h + 15
+
+        # ── 删牌服务 ──
+        self.shop_remove_rect = pygame.Rect((WINDOW_WIDTH - 400) // 2, relic_y, 400, 50)
+        can_afford = game.gold >= game.shop_remove_price
+        color = COLOR_BUTTON if can_afford else COLOR_DEAD
+        pygame.draw.rect(self.screen, color, self.shop_remove_rect, border_radius=8)
+        remove_text = self.font.render(f"删除一张牌 ({game.shop_remove_price} 金币)", True, COLOR_TEXT)
+        self.screen.blit(remove_text, (self.shop_remove_rect.x + (400 - remove_text.get_width()) // 2, self.shop_remove_rect.y + 12))
+
+        # ── 离开 ──
         btn_w, btn_h = 120, 40
-        self.shop_leave_rect = pygame.Rect((WINDOW_WIDTH - btn_w) // 2, y + card_h + 30, btn_w, btn_h)
+        self.shop_leave_rect = pygame.Rect((WINDOW_WIDTH - btn_w) // 2, relic_y + 70, btn_w, btn_h)
         pygame.draw.rect(self.screen, COLOR_BUTTON_DIM, self.shop_leave_rect, border_radius=6)
         leave_text = self.font.render("离开", True, COLOR_TEXT)
         self.screen.blit(leave_text, (self.shop_leave_rect.x + (btn_w - leave_text.get_width()) // 2, self.shop_leave_rect.y + 8))
@@ -603,10 +625,37 @@ class PygameView:
         if self.shop_leave_rect.collidepoint(pos):
             game.shop_leave()
             return
+        if self.shop_relic_rect.collidepoint(pos) and game.shop_relic is not None:
+            game.shop_buy_relic()
+            return
+        if self.shop_remove_rect.collidepoint(pos):
+            self._handle_shop_remove(game)
+            return
         for i, rect in enumerate(self.shop_rects):
             if rect.collidepoint(pos):
                 game.shop_buy_card(i)
                 return
+
+    def _handle_shop_remove(self, game: "GameController") -> None:
+        """打开删牌选择界面。"""
+        if game.gold < game.shop_remove_price:
+            return
+
+        def _on_remove_done(card) -> None:
+            idx = None
+            for i, c in enumerate(game.player.deck_pile):
+                if c is card:
+                    idx = i
+                    break
+            if idx is not None:
+                game.shop_remove_card(idx)
+
+        self.browser = CardBrowser(
+            list(game.player.deck_pile),
+            f"选择要删除的牌 ({game.shop_remove_price} 金币)",
+            selectable=True,
+            on_select=_on_remove_done,
+        )
 
     # ================================================================== #
     # 宝箱房渲染
@@ -728,18 +777,74 @@ class PygameView:
     # ================================================================== #
     def _render_game_over(self, game: "GameController") -> None:
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
-        if "通关" in game.message or "Boss" in game.message:
-            text, color = "✅ 游戏通关！", (100, 255, 100)
+
+        player = game.player
+        is_win = "通关" in game.message or "恭喜" in game.message
+
+        if is_win:
+            title, title_color = "🏆 游戏通关！", (100, 255, 100)
         else:
-            text, color = "❌ 游戏结束", (255, 100, 100)
-        surf = self.font_big.render(text, True, color)
+            title, title_color = "💀 游戏结束", (255, 100, 100)
+
+        # 标题
+        surf = self.font_big.render(title, True, title_color)
         x = (WINDOW_WIDTH - surf.get_width()) // 2
-        y = (WINDOW_HEIGHT - surf.get_height()) // 2
+        y = 120
         self.screen.blit(surf, (x, y))
-        hint = self.font.render("点击任意处继续", True, COLOR_TEXT)
-        self.screen.blit(hint, ((WINDOW_WIDTH - hint.get_width()) // 2, y + 50))
+
+        # 结算面板
+        panel_x = 300
+        panel_y = 200
+        panel_w = 680
+        panel_h = 400
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((20, 20, 35, 220))
+        pygame.draw.rect(panel, (80, 80, 100), panel.get_rect(), 2)
+        self.screen.blit(panel, (panel_x, panel_y))
+
+        # 分数计算
+        hp_score = player.current_hp * 2
+        gold_score = game.gold
+        kill_score = player.total_kills * 5
+        floor_score = player.floors_cleared * 10
+        relic_score = len(player.relics) * 15
+        deck_score = max(0, (30 - len(player.deck_pile))) * 3
+        total_score = hp_score + gold_score + kill_score + floor_score + relic_score + deck_score
+        if is_win:
+            total_score += 100
+
+        stats = [
+            ("📊 结算统计", "", True),
+            ("", "", False),
+            (f"当前 HP: {player.current_hp}/{player.max_hp}", f"+{hp_score} 分", False),
+            (f"金币: {game.gold}", f"+{gold_score} 分", False),
+            (f"击杀数: {player.total_kills}", f"+{kill_score} 分", False),
+            (f"已清理楼层: {player.floors_cleared}", f"+{floor_score} 分", False),
+            (f"遗物数量: {len(player.relics)}", f"+{relic_score} 分", False),
+            (f"牌组大小: {len(player.deck_pile)}", f"+{deck_score} 分", False),
+        ]
+        if is_win:
+            stats.append(("通关奖励", "+100 分", False))
+        stats.append(("", "", False))
+        stats.append((f"总分: {total_score}", "", True))
+
+        line_y = 15
+        for label, value, is_header in stats:
+            if is_header:
+                text_surf = self.font_big.render(label, True, (255, 215, 0) if "总分" in label else COLOR_TEXT)
+                panel.blit(text_surf, ((panel_w - text_surf.get_width()) // 2, line_y))
+            else:
+                label_surf = self.font.render(label, True, COLOR_TEXT)
+                panel.blit(label_surf, (30, line_y))
+                if value:
+                    val_surf = self.font.render(value, True, (180, 180, 100))
+                    panel.blit(val_surf, (panel_w - val_surf.get_width() - 30, line_y))
+            line_y += 32
+
+        hint = self.font.render("点击任意处继续", True, (180, 180, 180))
+        self.screen.blit(hint, ((WINDOW_WIDTH - hint.get_width()) // 2, panel_y + panel_h + 15))
 
     # ================================================================== #
     # 战斗辅助渲染
@@ -965,8 +1070,13 @@ class PygameView:
             for i, rect in enumerate(self.browser.card_rects):
                 if rect.collidepoint(pos) and i < len(self.browser.cards):
                     sel = self.browser.cards[i]
+                    browser = self.browser
                     self.browser = None
-                    self._resolve_pending_with_card(battle, sel)
+                    # 商店删牌 / 事件等其他场景通过 on_select 回调
+                    if browser.on_select is not None:
+                        browser.on_select(sel)
+                    else:
+                        self._resolve_pending_with_card(battle, sel)
                     return
             return
         else:
