@@ -44,6 +44,8 @@ class GameState(Enum):
     REWARD = "奖励"
     CAMPFIRE = "篝火"
     SHOP = "商店"
+    TREASURE = "宝箱"
+    EVENT = "事件"
     GAME_OVER = "游戏结束"
 
 
@@ -77,6 +79,19 @@ class GameController:
 
         # 商店相关
         self.shop_cards: List[tuple[Card, int]] = []  # (卡牌, 价格)
+
+        # 宝箱房相关
+        self.treasure_gold: int = 0
+        self.treasure_relic = None  # Relic
+
+        # 事件房相关
+        self.current_event = None  # GameEvent
+        self.pending_delete_card: bool = False
+        self.pending_upgrade_card: bool = False
+
+        # 多幕相关
+        self.current_act: int = 1
+        self.max_acts: int = 3
 
         logger.info("[Game] 游戏初始化完成: %s", player_name)
 
@@ -124,18 +139,32 @@ class GameController:
             self.message = "篝火：休息回复 30% HP，或升级一张牌"
         elif node.room_type == RoomType.SHOP:
             self._enter_shop()
+        elif node.room_type == RoomType.TREASURE:
+            self._enter_treasure()
+        elif node.room_type == RoomType.EVENT:
+            self._enter_event()
         else:
             logger.warning("[Game] 未知房间类型: %s", node.room_type)
 
     def return_to_map(self) -> None:
-        """从战斗/奖励/篝火/商店返回地图。"""
+        """从战斗/奖励/篝火/商店/宝箱/事件返回地图。"""
         self.state = GameState.MAP
 
+        # 检查是否需要进入下一幕
         if self.game_map.is_complete():
-            self.state = GameState.GAME_OVER
-            self.message = "恭喜！你击败了 Boss，通关成功！"
-            logger.info("[Game] 游戏通关！")
-            return
+            if self.current_act < self.max_acts:
+                # 进入下一幕
+                self.current_act += 1
+                self.game_map = Map(num_layers=7)
+                self.message = f"第 {self.current_act} 幕开始！选择下一个房间前进"
+                logger.info("[Game] 进入第 %d 幕", self.current_act)
+                return
+            else:
+                # 通关
+                self.state = GameState.GAME_OVER
+                self.message = "恭喜！你击败了所有 Boss，通关成功！"
+                logger.info("[Game] 游戏通关！")
+                return
 
         self.message = "选择下一个房间前进"
 
@@ -328,6 +357,106 @@ class GameController:
         self.return_to_map()
 
     # ------------------------------------------------------------------ #
+    # 宝箱房
+    # ------------------------------------------------------------------ #
+    def _enter_treasure(self) -> None:
+        """进入宝箱房：获得 30~70 金币 + 1 个随机遗物。"""
+        from src.data.relics import Vajra, GamblersChip
+
+        self.treasure_gold = random.randint(30, 70)
+        self.gold += self.treasure_gold
+
+        # 随机选 1 个遗物（玩家尚未拥有的）
+        relic_pool = [Vajra, GamblersChip]
+        owned_names = {r.name for r in self.player.relics}
+        available = [r for r in relic_pool if r().name not in owned_names]
+        if available:
+            relic_cls = random.choice(available)
+            self.treasure_relic = relic_cls()
+            self.player.relics.append(self.treasure_relic)
+        else:
+            # 已拥有所有遗物，额外给金币
+            extra = random.randint(30, 50)
+            self.treasure_gold += extra
+            self.gold += extra
+            self.treasure_relic = None
+
+        self.state = GameState.TREASURE
+        relic_name = self.treasure_relic.name if self.treasure_relic else "无（已有所有遗物，获得额外金币）"
+        self.message = f"宝箱！获得 {self.treasure_gold} 金币，遗物：{relic_name}"
+        logger.info(
+            "[Game] 宝箱房: %d 金币, 遗物=%s",
+            self.treasure_gold, relic_name,
+        )
+
+    def confirm_treasure(self) -> None:
+        """确认宝箱奖励，返回地图。
+
+        若是第一页宝箱房，生成第二页地图。
+        """
+        assert self.state == GameState.TREASURE, "[Game] 当前不在宝箱状态"
+        self.treasure_gold = 0
+        self.treasure_relic = None
+        # 判断是否为第一页宝箱房
+        if not self.game_map.page1_completed:
+            # 第一页宝箱房完成，生成第二页
+            self.game_map.generate_page2()
+            self.state = GameState.MAP
+            self.message = "进入第二页地图！选择下一个房间前进"
+            logger.info("[Game] 第一页完成，生成第二页地图")
+            return
+        self.return_to_map()
+
+    # ------------------------------------------------------------------ #
+    # 事件房
+    # ------------------------------------------------------------------ #
+    def _enter_event(self) -> None:
+        """进入事件房：随机抽取一个事件。"""
+        from src.data.events import EVENT_POOL
+
+        event_cls = random.choice(EVENT_POOL)
+        self.current_event = event_cls()
+        self.state = GameState.EVENT
+        self.message = f"事件：{self.current_event.name}"
+        logger.info("[Game] 事件房: %s", self.current_event.name)
+
+    def select_event_option(self, option_idx: int) -> None:
+        """玩家选择事件选项。"""
+        assert self.state == GameState.EVENT, "[Game] 当前不在事件状态"
+        assert self.current_event is not None, "[Game] 无当前事件"
+        self.current_event.execute_option(option_idx, self)
+        # 如果事件设置了 pending_delete_card/pending_upgrade_card，不立即返回地图
+        # 由 View 层完成卡牌选择后调用 confirm_event_card_action
+        if not self.pending_delete_card and not self.pending_upgrade_card:
+            self.current_event = None
+            self.return_to_map()
+
+    def confirm_event_card_action(self, card_index: int = -1) -> None:
+        """事件卡牌选择确认（删除/升级）。
+
+        Args:
+            card_index: 选中的卡牌索引（-1 表示取消）。
+        """
+        if self.pending_delete_card:
+            self.pending_delete_card = False
+            if card_index >= 0 and card_index < len(self.player.deck_pile):
+                card = self.player.deck_pile[card_index]
+                self.player.deck_pile.remove(card)
+                self.message = f"删除了 {card.name}"
+                logger.info("[Game] 事件删除卡牌: %s", card.name)
+        elif self.pending_upgrade_card:
+            self.pending_upgrade_card = False
+            if card_index >= 0 and card_index < len(self.player.deck_pile):
+                card = self.player.deck_pile[card_index]
+                if not card.upgraded:
+                    card.upgrade()
+                    self.message = f"升级了 {card.name}"
+                    logger.info("[Game] 事件升级卡牌: %s", card.name)
+
+        self.current_event = None
+        self.return_to_map()
+
+    # ------------------------------------------------------------------ #
     # 状态查询
     # ------------------------------------------------------------------ #
     def is_game_over(self) -> bool:
@@ -345,4 +474,9 @@ class GameController:
             "reward_cards": self.reward_cards,
             "reward_gold": self.reward_gold,
             "battle": self.battle,
+            "treasure_gold": self.treasure_gold,
+            "treasure_relic": self.treasure_relic,
+            "current_event": self.current_event,
+            "current_act": self.current_act,
+            "max_acts": self.max_acts,
         }

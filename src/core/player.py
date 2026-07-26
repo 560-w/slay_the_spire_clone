@@ -74,6 +74,8 @@ class Player(Entity):
         # 跨战斗持久牌组（真正的玩家牌组，战斗中不改变）
         # 战斗开始时从此深拷贝到 draw_pile；奖励/购买的新牌加入此处
         self.deck_pile: List[Card] = []
+        # 遗物列表（跨战斗持久化）
+        self.relics: list = []  # List[Relic]
 
         logger.debug(
             "[Player] 创建玩家 %s (max_hp=%d, max_energy=%d)",
