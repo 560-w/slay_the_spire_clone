@@ -103,11 +103,7 @@ class DebugConsole:
             pygame.key.stop_text_input()
             return True
 
-        # 可打印字符（用 TEXTINPUT 事件更可靠，但 KEYDOWN 的 unicode 也可用）
-        if event.unicode and event.unicode.isprintable() and event.key != pygame.K_BACKQUOTE:
-            self.input_text += event.unicode
-            return True
-
+        # 可打印字符由 TEXTINPUT 事件处理，这里不重复添加
         return True  # 屏蔽其他键
 
     def handle_text_input(self, text: str) -> None:

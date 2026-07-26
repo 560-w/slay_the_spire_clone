@@ -98,6 +98,7 @@ class Card(ABC):
         self.ethereal: bool = ethereal
         self.is_x_cost: bool = is_x_cost
         self.auto_play_end_of_turn: bool = auto_play_end_of_turn
+        self.upgraded: bool = False
 
         logger.debug(
             "[Card] 创建卡牌: %s (cost=%d, type=%s, needs_target=%s, "
@@ -149,6 +150,22 @@ class Card(ABC):
     def get_display_cost(self) -> str:
         """获取用于 UI 显示的费用字符串（X费牌显示为 'X'）。"""
         return "X" if self.is_x_cost else str(self.cost)
+
+    # ------------------------------------------------------------------ #
+    # 升级
+    # ------------------------------------------------------------------ #
+    def upgrade(self) -> None:
+        """升级卡牌（默认行为：伤害/护甲 +3，费用 -1 最低 0）。
+
+        子类可重写此方法实现特殊升级效果。
+        """
+        if self.upgraded:
+            return
+        self.upgraded = True
+        self.name = f"{self.name}+"
+        if self.cost > 0:
+            self.cost -= 1
+        logger.info("[Card] 升级卡牌: %s", self.name)
 
     # ------------------------------------------------------------------ #
     # 魔术方法

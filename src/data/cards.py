@@ -189,7 +189,8 @@ class Wound(Card):
         )
 
     def play(self, user, target=None, battle=None, x_value=0):
-        raise RuntimeError("[Wound] 状态牌无法打出")
+        # 不可手动打出，但被自动打出（如倾斜）时无效果通过
+        logger.info("[Wound] 伤口被自动打出，无效果")
 
 
 class Dazed(Card):
@@ -205,7 +206,8 @@ class Dazed(Card):
         )
 
     def play(self, user, target=None, battle=None, x_value=0):
-        raise RuntimeError("[Dazed] 状态牌无法打出")
+        # 不可手动打出，但被自动打出（如倾斜）时无效果通过
+        logger.info("[Dazed] 晕眩被自动打出，无效果")
 
 
 class Burn(Card):

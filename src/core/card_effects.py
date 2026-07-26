@@ -11,6 +11,8 @@
 2. gain_block 经 BuffSystem.compute_block_gain 修正（敏捷）。
 3. lose_hp 无视护甲，直接扣血。
 4. 纯工具函数，无状态。
+
+需求9: deal_damage/gain_block 记录结构化日志（通过 battle.log_* 方法）。
 """
 
 from __future__ import annotations
@@ -32,22 +34,36 @@ class CardEffects:
 
     @staticmethod
     def deal_damage(battle, source, target, amount):
-        """造成伤害（经 buff 修正：力量/虚弱/易伤）。"""
+        """造成伤害（经 buff 修正：力量/虚弱/易伤）。需求9: 记录日志。"""
         assert amount >= 0
         outgoing = battle.buff_system.compute_outgoing_damage(source, amount)
         incoming = battle.buff_system.compute_incoming_damage(target, outgoing)
         logger.info("[CardEffects] %s -> %s 造成伤害 (基础%d -> 最终%d)", source.name, target.name, amount, incoming)
-        return target.take_damage(incoming)
+        hp_before = target.current_hp
+        target.take_damage(incoming)
+        actual = hp_before - target.current_hp
+        # 需求9: 记录伤害日志
+        if hasattr(battle, "log_damage"):
+            battle.log_damage(source.name, target.name, actual)
+        return actual
 
     @staticmethod
     def gain_block(battle, user, amount):
-        """获得格挡（经敏捷修正）。"""
+        """获得格挡（经敏捷修正）。需求9: 记录日志。"""
         actual = battle.buff_system.compute_block_gain(user, amount)
-        return user.gain_block(actual)
+        user.gain_block(actual)
+        # 需求9: 记录格挡日志
+        if hasattr(battle, "log_block"):
+            battle.log_block(user.name, actual)
+        return actual
 
     @staticmethod
     def lose_hp(user, amount):
-        """失去生命（无视护甲，直接扣血）。"""
+        """失去生命（无视护甲，直接扣血）。
+
+        注意: 此函数无 battle 参数，无法记录结构化日志。
+        需求12: 扣血后死亡检查由 battle._execute_play 负责。
+        """
         assert amount >= 0
         hp_loss = min(amount, user.current_hp)
         user.current_hp -= hp_loss
@@ -71,5 +87,5 @@ class CardEffects:
 
     @staticmethod
     def add_buff(target, buff_name, stacks):
-        """获得/给予 buff（层数可负）。"""
+        """获得/给予 buff（层数可负）。需求9: 不在此记录日志（由调用方 battle 记录）。"""
         return target.add_buff(buff_name, stacks)

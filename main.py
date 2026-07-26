@@ -1,71 +1,93 @@
-"""main.py: 项目入口（战斗循环 + 调试控制台）。"""
+"""
+main.py — 杀戮尖塔克隆版 Phase 5 入口。
 
-from __future__ import annotations
+通过 GameController 驱动完整游戏流程:
+地图 → 战斗 → 奖励 → 篝火 → 商店 → 地图 → ... → Boss → 通关
+"""
+
 import logging
+import sys
 import pygame
-
-from src.controllers.battle import BattleController, BattleState
-from src.core.player import Player
-from src.data.cards import create_test_deck_with_new_cards as create_starter_deck
-from src.data.enemies import create_test_enemies
+from src.controllers.game import GameController, GameState
+from src.controllers.battle import BattleState
 from src.views.pygame_view import PygameView
 from src.views.console import DebugConsole
 
-
-def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)-5s | %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger("main")
 
 
 def main():
-    setup_logging()
-    logger = logging.getLogger("main")
-
-    player = Player(name="铁甲战士", max_hp=75, max_energy=3)
-    for card in create_starter_deck():
-        player.add_card_to_draw(card)
-
-    enemies = create_test_enemies()
-    battle = BattleController(player=player, enemies=enemies)
+    game = GameController()
     view = PygameView()
     console = DebugConsole()
-    console.battle = battle
-    view.console = console
-
-    battle.start_battle()
-    logger.info("[Main] 战斗开始")
-
     running = True
+
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_BACKQUOTE:  # ~ 键切换
+                break
+
+            # 调试控制台：Shift+~ 切换
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKQUOTE:
+                mods = pygame.key.get_mods()
+                if mods & pygame.KMOD_SHIFT:
                     console.toggle()
-                elif console.active:
-                    # 控制台激活时只处理特殊键（回车/退格/ESC）
-                    if event.key in (pygame.K_RETURN, pygame.K_BACKSPACE, pygame.K_ESCAPE):
-                        console.handle_keydown(event)
-            elif event.type == pygame.TEXTINPUT and console.active:
-                # 控制台激活时用 TEXTINPUT 事件处理字符输入
-                console.handle_text_input(event.text)
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if battle.is_over():
+                    continue
+
+            # 控制台激活时，由控制台处理事件
+            if console.active:
+                if event.type == pygame.KEYDOWN:
+                    console.handle_keydown(event)
+                elif event.type == pygame.TEXTINPUT:
+                    console.handle_text_input(event.text)
+                continue
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if game.is_game_over():
                     running = False
-                elif not console.active:
-                    view.handle_click(battle, event.pos)
+                    break
+                if view.handle_click(game, event.pos):
+                    running = False
+                    break
 
-        if not console.active and battle.state == BattleState.ENEMY_TURN:
-            view.run_enemy_turn_with_delay(battle)
+            # 需求6/10: 鼠标移动事件（悬停检测）
+            if event.type == pygame.MOUSEMOTION:
+                if hasattr(view,"handle_mousemotion"): view.handle_mousemotion(game, event.pos)
 
-        view.render(battle)
+        if not running:
+            break
+
+        # 更新控制台战斗引用
+        if game.battle is not None:
+            console.battle = game.battle
+
+        # 战斗状态特殊处理：敌人回合自动执行 & 战斗结束检测
+        if game.state == GameState.BATTLE and game.battle is not None:
+            battle = game.battle
+            if battle.is_over():
+                pass
+            elif battle.state == BattleState.ENEMY_TURN:
+                view.run_enemy_turn_with_delay(game)
+                if battle.is_over():
+                    game.on_battle_end()
+
+        view.render(game)
+
+        # 渲染调试控制台（覆盖在游戏界面上方）
+        if console.active:
+            console.render(view.screen, view.font, view.font_small)
+
+        pygame.display.flip()
         view.clock.tick(30)
 
     pygame.quit()
+    logger.info("游戏退出")
 
 
 if __name__ == "__main__":

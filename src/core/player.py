@@ -71,6 +71,9 @@ class Player(Entity):
         self.exhaust_pile: List[Card] = []
         self.processing_pile: List[Card] = []  # 处理区（栈结构，末尾为栈顶）
         self.max_hand_size: int = max_hand_size
+        # 跨战斗持久牌组（真正的玩家牌组，战斗中不改变）
+        # 战斗开始时从此深拷贝到 draw_pile；奖励/购买的新牌加入此处
+        self.deck_pile: List[Card] = []
 
         logger.debug(
             "[Player] 创建玩家 %s (max_hp=%d, max_energy=%d)",
@@ -286,6 +289,10 @@ class Player(Entity):
     def exhaust_pile_size(self) -> int:
         """消耗堆数量。"""
         return len(self.exhaust_pile)
+
+    def deck_pile_size(self) -> int:
+        """跨战斗持久牌组数量。"""
+        return len(self.deck_pile)
 
     # ------------------------------------------------------------------ #
     # 魔术方法

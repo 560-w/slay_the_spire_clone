@@ -24,13 +24,17 @@ slay_the_spire_clone/
    |  +- status_effect.py           # StatusEffect 基类+注册表+7种效果
    |  +- card_effects.py            # CardEffects 工具类
    |  +- pending_action.py          # 挂起动作系统
+   |  +- map.py                     # Map 地图系统（节点类型、Boss、随机生成）
    +- data/                        # 数据层
    |  +- cards.py                  # 11种范例卡牌
    |  +- enemies.py                 # 2种敌人
-   +- controllers/battle.py        # BattleController 战斗状态机
+   +- controllers/
+   |  +- battle.py                  # BattleController 战斗状态机
+   |  +- game.py                    # GameController 游戏流程控制
    +- views/
-      +- pygame_view.py            # pygame 简易界面
+      +- pygame_view.py            # pygame 图形界面（地图/战斗/奖励/篝火/商店/游戏结束）
       +- card_browser.py           # 通用卡牌浏览/选择模态窗口
+      +- console.py                # 调试控制台（Shift+~ 切换）
 
 ## 快速开始
 
@@ -67,6 +71,26 @@ UI 功能:
 - 通用 CardBrowser 模态窗口（牌堆查看/选牌统一）
 - 左下牌堆按钮 / 右侧战斗日志 / X费显示
 
+### Phase 4: 卡牌库扩展
+- 新增 10+ 张卡牌（含铁甲战士、静默猎人、故障机器人风格）
+- 新增 2 种敌人（酸液史莱姆/尖刺史莱姆 + 史莱姆Boss）
+- Boss 多阶段、Split 分裂机制
+- 金币系统（gold）+ 商店购买卡牌
+- 奖励系统（战斗胜利选卡/金币）
+- 篝火系统（休息回血/升级卡牌）
+- 游戏结束/通关界面
+
+### Phase 5: 地图与 Roguelike 元素
+- 随机地图生成（Map 系统，层级式节点图）
+- 多种房间类型：战斗(⚔) / 精英(💀) / 篝火(🔥) / 商店(💰) / Boss(👑)
+- GameController 完整游戏流程控制
+- 地图界面渲染与节点选择
+
+### Phase 6: 图形 UI 美化
+- Emoji 图标映射（卡牌类型、敌人、Buff 效果）
+- 调试控制台（Shift+~ 切换，支持运行时命令）
+- 统一 pygame.display.flip() 到 main.py 主循环
+
 ## Git 协作约定
 
 分支: main(稳定) / develop(集成) / feature-xxx / fix-xxx
@@ -77,6 +101,6 @@ Commit: type(scope): subject
 - [x] Phase 1: 底层骨架
 - [x] Phase 2: 战斗循环
 - [x] Phase 3: 卡牌词条与状态效果
-- [ ] Phase 4: 卡牌库扩展
-- [ ] Phase 5: 地图与 Roguelike 元素
-- [ ] Phase 6: 图形 UI 美化
+- [x] Phase 4: 卡牌库扩展
+- [x] Phase 5: 地图与 Roguelike 元素
+- [x] Phase 6: 图形 UI 美化

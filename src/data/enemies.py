@@ -65,6 +65,70 @@ class SpikeSlime(Enemy):
         ]
 
 
-def create_test_enemies() -> list[Enemy]:
-    """创建测试用敌人组合：1 酸液史莱姆 + 1 尖刺史莱姆。"""
+class BossSlime(Enemy):
+    """Boss 史莱姆王：Boss 敌人，HP 120。
+
+    意图模式（循环）:
+    - 回合1: 攻击 15
+    - 回合2: 攻击 15
+    - 回合3: 塞牌（向玩家牌堆塞入「伤口」）
+    - 回合4: 防御 10
+    """
+
+    def __init__(self, max_hp: int = 120) -> None:
+        super().__init__(
+            name="史莱姆王",
+            max_hp=max_hp,
+            enemy_id="boss_slime",
+            is_elite=False,
+        )
+        from .cards import create_wound
+
+        self.intent_pattern = [
+            [Intent(Intent.TYPE_ATTACK, base_value=15)],
+            [Intent(Intent.TYPE_ATTACK, base_value=15)],
+            [Intent(Intent.TYPE_ADD_CARD, status_card=create_wound())],
+            [Intent(Intent.TYPE_DEFEND, base_value=10)],
+        ]
+
+
+class EliteSlime(Enemy):
+    """精英史莱姆：精英敌人，HP 65。
+
+    意图模式（循环）:
+    - 回合1: 攻击 12
+    - 回合2: 强化（获得 2 力量）
+    - 回合3: 攻击 12
+    """
+
+    def __init__(self, max_hp: int = 65) -> None:
+        super().__init__(
+            name="精英史莱姆",
+            max_hp=max_hp,
+            enemy_id="elite_slime",
+            is_elite=True,
+        )
+        self.intent_pattern = [
+            [Intent(Intent.TYPE_ATTACK, base_value=12)],
+            [Intent(Intent.TYPE_BUFF, base_value=2, buff_name="力量")],
+            [Intent(Intent.TYPE_ATTACK, base_value=12)],
+        ]
+
+
+def create_test_enemies(
+    elite: bool = False, boss: bool = False
+) -> list[Enemy]:
+    """创建测试用敌人组合。
+
+    Args:
+        elite: 是否为精英战。
+        boss: 是否为 Boss 战。
+
+    Returns:
+        敌人列表。
+    """
+    if boss:
+        return [BossSlime()]
+    if elite:
+        return [EliteSlime()]
     return [AcidSlime(), SpikeSlime()]

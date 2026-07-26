@@ -1,0 +1,115 @@
+"""relics.py: 具体遗物实现。
+
+当前实现:
+1. VajraRelic（金刚杵）：战斗开始获得 1 层力量
+2. GamblingChipRelic（赌徒筹码）：战斗开始时可弃置任意数量手牌并抽等量的牌
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, List
+
+from src.core.relic import Relic, RelicRarity
+
+if TYPE_CHECKING:
+    from src.controllers.battle import BattleController
+    from src.core.card import Card
+    from src.core.player import Player
+
+logger = logging.getLogger(__name__)
+
+
+class VajraRelic(Relic):
+    """金刚杵：战斗开始时获得 1 层力量。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="金刚杵",
+            description="战斗开始时，获得 1 层力量。",
+            rarity=RelicRarity.COMMON,
+        )
+
+    def on_combat_start(self, player: "Player", battle: "BattleController") -> None:
+        """战斗开始时获得 1 层力量。"""
+        player.add_buff("力量", 1)
+        logger.info("[Relic] 金刚杵触发: %s 获得 1 层力量", player.name)
+
+
+class GamblingChipRelic(Relic):
+    """赌徒筹码：战斗开始时，可以弃置任意数量的手牌并抽等量的牌。
+
+    实现方式: 通过 BattleController 设置 PendingCardSelection（discard 动作），
+    回调中按弃牌数量抽等量的牌。count 设为手牌数，玩家可自由选择 0~N 张。
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="赌徒筹码",
+            description="战斗开始时，可以弃置任意数量的手牌并抽等量的牌。",
+            rarity=RelicRarity.RARE,
+        )
+
+    def on_combat_start(self, player: "Player", battle: "BattleController") -> None:
+        """战斗开始时触发弃牌选择。
+
+        若玩家无手牌则不触发（避免空选择）。
+        """
+        if not player.hand:
+            logger.info("[Relic] 赌徒筹码未触发: %s 无手牌", player.name)
+            return
+
+        from src.core.pending_action import PendingCardSelection
+
+        hand_copy: List["Card"] = list(player.hand)
+
+        def _on_discard(selected_cards: List["Card"]) -> None:
+            """弃牌完成后，抽等量的牌。"""
+            draw_count: int = len(selected_cards)
+            if draw_count > 0:
+                player.draw_cards(draw_count)
+                logger.info(
+                    "[Relic] 赌徒筹码回调: %s 弃置 %d 张，抽 %d 张",
+                    player.name, draw_count, draw_count,
+                )
+            else:
+                logger.info("[Relic] 赌徒筹码回调: %s 未弃牌", player.name)
+
+        battle.pending_action = PendingCardSelection(
+            prompt="赌徒筹码：选择要弃置的手牌（可多选，确认后抽等量的牌）",
+            count=len(hand_copy),
+            action="discard",
+            cards=hand_copy,
+            callback=_on_discard,
+        )
+        battle.message = battle.pending_action.prompt
+        logger.info(
+            "[Relic] 赌徒筹码触发: %s 等待弃牌选择（最多 %d 张）",
+            player.name, len(hand_copy),
+        )
+
+
+# ====================================================================== #
+# 遗物注册表（供宝藏房随机抽取）
+# ====================================================================== #
+def get_all_relics() -> List[Relic]:
+    """获取所有遗物的实例列表（每次返回新实例）。"""
+    return [
+        VajraRelic(),
+        GamblingChipRelic(),
+    ]
+
+
+def get_random_relic(rng=None) -> Relic:
+    """随机获取一个遗物实例。
+
+    Args:
+        rng: 可选的随机数生成器（需有 choice 方法），默认用 random。
+
+    Returns:
+        一个新的遗物实例。
+    """
+    import random
+    pool: List[type] = [VajraRelic, GamblingChipRelic]
+    chosen_cls: type = (rng or random).choice(pool)
+    return chosen_cls()
